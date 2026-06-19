@@ -795,7 +795,7 @@ public class RandomizerGUI {
             pc.gridy = 6;
             pc.gridwidth = GridBagConstraints.REMAINDER;
             pc.anchor = GridBagConstraints.WEST;
-            pc.fill = GridBagConstraints.HORIZONTAL;
+            pc.fill = GridBagConstraints.NONE; // size the sub-panel to its content, don't stretch it full-width
             pc.insets = new Insets(0, 16, 4, 0);
             pbsPanel.add(gatePanel, pc);
         } else if (pbsPanel != null) {
@@ -815,8 +815,10 @@ public class RandomizerGUI {
         c.fill = GridBagConstraints.NONE;
         panel.add(new JLabel(labelText), c);
         c.gridx = 1;
-        c.weightx = 1.0;
-        c.fill = GridBagConstraints.HORIZONTAL;
+        c.weightx = 0.0;
+        c.fill = GridBagConstraints.NONE;
+        // Pin sub-controls to a sensible fixed width so they don't stretch the whole panel.
+        field.setPreferredSize(new Dimension(240, field.getPreferredSize().height));
         panel.add(field, c);
     }
 
