@@ -27,6 +27,7 @@ import com.dabomstew.pkrandom.cli.CliRandomizer;
 import com.dabomstew.pkrandom.customnames.CustomNamesSet;
 import com.dabomstew.pkrandom.exceptions.InvalidSupplementFilesException;
 import com.dabomstew.pkrandom.exceptions.RandomizationException;
+import com.dabomstew.pkrandom.log.ManualEditRegistry;
 import com.dabomstew.pkrandom.random.SeedPicker;
 import com.dabomstew.pkrandom.randomizers.TrainerMovesetRandomizer;
 import com.dabomstew.pkrandom.updaters.TypeEffectivenessUpdater;
@@ -79,6 +80,15 @@ public class RandomizerGUI {
     private JRadioButton pbsUnchangedRadioButton;
     private JRadioButton pbsShuffleRadioButton;
     private JRadioButton pbsRandomRadioButton;
+    // "Buff / gate base stats" (BaseStatisticsMod.GATED) - added programmatically in initExplicit()
+    private JRadioButton pbsGatedRadioButton;
+    private JSpinner pbsGateThresholdSpinner;
+    private JSpinner pbsGateAmountSpinner;
+    private JComboBox<String> pbsGateDirectionComboBox;
+    private JComboBox<String> pbsGateAmountStyleComboBox;
+    private JComboBox<String> pbsGateDistributionComboBox;
+    private JComboBox<String> pbsGateCeilingComboBox;
+    private JComboBox<String> pbsGateEvoHandlingComboBox;
     private JRadioButton pbsLegendariesSlowRadioButton;
     private JRadioButton pbsStrongLegendariesSlowRadioButton;
     private JRadioButton pbsAllMediumFastRadioButton;
@@ -349,6 +359,8 @@ public class RandomizerGUI {
 
     // Pokemon Editors Tab
     private JPanel pokemonEditorsPanel;
+    private JButton gen1EditorButton;
+    private JButton gen2EditorButton;
     private JButton gen3EditorButton;
     private JButton gen4EditorButton;
     private JButton gen5EditorButton;
@@ -364,6 +376,7 @@ public class RandomizerGUI {
     private JCheckBox teAddRandomImmunitiesCheckBox;
     private JCheckBox teUpdateCheckbox;
     private JButton teManualEditButton;
+    private JButton tpLevelCurveButton;
     private JLabel spBstLimitsLabel;
     private JCheckBox spBSTMinimumCheckbox;
     private JCheckBox spBSTMaximumCheckbox;
@@ -457,6 +470,7 @@ public class RandomizerGUI {
         attemptReadConfig();
         initExplicit();
         initTypeEffectivenessEditorUI();
+        initLevelCurveButtonUI();
         initTweaksPanel();
         initPokemonEditorsPanel();
         initFileChooserDirectories();
@@ -495,7 +509,10 @@ public class RandomizerGUI {
                 conn.disconnect();
 
             } catch (Exception e) {
-                e.printStackTrace();
+                // Offline, or a Java runtime whose CA store predates GitHub's
+                // certificates. Not worth a full stack trace - the version
+                // label simply stays "???".
+                System.err.println("Update check failed: " + e);
             }
 
             // If the release version is newer than this version, bold it to make it more
@@ -508,7 +525,7 @@ public class RandomizerGUI {
                 websiteLinkLabel.setText(
                         String.format(bundle.getString("GUI.websiteLinkLabel.text"), finalLatestVersionString));
             });
-        }).run();
+        }).start(); // start(), not run(): run() executed this network call on the UI thread, delaying startup
 
         frame.setTitle(String.format(bundle.getString("GUI.windowTitle"), Version.VERSION_STRING));
 
@@ -708,6 +725,123 @@ public class RandomizerGUI {
             }
         });
         batchRandomizationMenuItem.addActionListener(e -> batchRandomizationSettingsDialog());
+
+        initGateBaseStatsUI();
+    }
+
+    /**
+     * Builds the "Buff / gate base stats" radio button and its sub-controls programmatically
+     * and inserts them into the base-stats panel (the panel that contains the existing
+     * pbs radios). Added in code because the IntelliJ .form is not edited for this feature.
+     */
+    private void initGateBaseStatsUI() {
+        pbsGatedRadioButton = new JRadioButton("Buff / gate base stats");
+        pbsGatedRadioButton.setToolTipText(
+                "Raise or lower the BST of Pokemon past a gate threshold, spread across the 6 stats.");
+
+        // Add to the same ButtonGroup as the other base-stat radios so it is mutually exclusive.
+        ButtonModel model = pbsUnchangedRadioButton.getModel();
+        if (model instanceof DefaultButtonModel) {
+            ButtonGroup group = ((DefaultButtonModel) model).getGroup();
+            if (group != null) {
+                group.add(pbsGatedRadioButton);
+            }
+        }
+
+        pbsGateThresholdSpinner = new JSpinner(new SpinnerNumberModel(400, 100, 800, 5));
+        pbsGateAmountSpinner = new JSpinner(new SpinnerNumberModel(20, 1, 255, 1));
+        pbsGateDirectionComboBox = new JComboBox<>(new String[] {
+                "Buff below threshold", "Nerf above threshold", "Both" });
+        pbsGateAmountStyleComboBox = new JComboBox<>(new String[] {
+                "Fixed amount", "Random up to amount" });
+        pbsGateDistributionComboBox = new JComboBox<>(new String[] {
+                "Proportional (keep shape)", "Even split", "Random spread" });
+        pbsGateCeilingComboBox = new JComboBox<>(new String[] {
+                "Allow crossing threshold", "Cap at threshold" });
+        pbsGateEvoHandlingComboBox = new JComboBox<>(new String[] {
+                "Per stage", "Whole line", "Keep below evolution" });
+
+        pbsGatedRadioButton.addActionListener(e -> enableOrDisableSubControls());
+
+        // Sub-controls live in their own panel, laid out as a simple labeled grid.
+        JPanel gatePanel = new JPanel(new GridBagLayout());
+        GridBagConstraints c = new GridBagConstraints();
+        c.anchor = GridBagConstraints.WEST;
+        c.insets = new Insets(2, 4, 2, 4);
+
+        int row = 0;
+        addGateRow(gatePanel, c, row++, "Direction:", pbsGateDirectionComboBox);
+        addGateRow(gatePanel, c, row++, "Threshold (BST):", pbsGateThresholdSpinner);
+        addGateRow(gatePanel, c, row++, "Amount (BST delta):", pbsGateAmountSpinner);
+        addGateRow(gatePanel, c, row++, "Amount style:", pbsGateAmountStyleComboBox);
+        addGateRow(gatePanel, c, row++, "Distribution:", pbsGateDistributionComboBox);
+        addGateRow(gatePanel, c, row++, "Ceiling:", pbsGateCeilingComboBox);
+        addGateRow(gatePanel, c, row++, "Evolution handling:", pbsGateEvoHandlingComboBox);
+
+        // Insert the radio + sub-panel into the existing base-stats panel, below the
+        // current controls (rows 1-4 are used by the .form; start ours at row 5).
+        Container pbsPanel = pbsUnchangedRadioButton.getParent();
+        if (pbsPanel != null && pbsPanel.getLayout() instanceof GridBagLayout) {
+            GridBagConstraints rc = new GridBagConstraints();
+            rc.gridx = 1;
+            rc.gridy = 5;
+            rc.gridwidth = 2;
+            rc.anchor = GridBagConstraints.WEST;
+            rc.insets = new Insets(6, 0, 0, 0);
+            pbsPanel.add(pbsGatedRadioButton, rc);
+
+            GridBagConstraints pc = new GridBagConstraints();
+            pc.gridx = 1;
+            pc.gridy = 6;
+            pc.gridwidth = GridBagConstraints.REMAINDER;
+            pc.anchor = GridBagConstraints.WEST;
+            pc.fill = GridBagConstraints.HORIZONTAL;
+            pc.insets = new Insets(0, 16, 4, 0);
+            pbsPanel.add(gatePanel, pc);
+        } else if (pbsPanel != null) {
+            pbsPanel.add(pbsGatedRadioButton);
+            pbsPanel.add(gatePanel);
+        }
+
+        // Start disabled until a ROM is open / the radio is selected.
+        pbsGatedRadioButton.setEnabled(false);
+        setGateSubControlsEnabled(false);
+    }
+
+    private void addGateRow(JPanel panel, GridBagConstraints c, int row, String labelText, JComponent field) {
+        c.gridx = 0;
+        c.gridy = row;
+        c.weightx = 0.0;
+        c.fill = GridBagConstraints.NONE;
+        panel.add(new JLabel(labelText), c);
+        c.gridx = 1;
+        c.weightx = 1.0;
+        c.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(field, c);
+    }
+
+    private void setGateSubControlsEnabled(boolean enabled) {
+        if (pbsGateThresholdSpinner == null) {
+            return;
+        }
+        pbsGateThresholdSpinner.setEnabled(enabled);
+        pbsGateAmountSpinner.setEnabled(enabled);
+        pbsGateDirectionComboBox.setEnabled(enabled);
+        pbsGateAmountStyleComboBox.setEnabled(enabled);
+        pbsGateDistributionComboBox.setEnabled(enabled);
+        pbsGateEvoHandlingComboBox.setEnabled(enabled);
+        // Ceiling only matters for buffs (and "both"); keep it enabled whenever gating is on.
+        pbsGateCeilingComboBox.setEnabled(enabled);
+    }
+
+    private static int clampSpinnerValue(int value, int min, int max) {
+        if (value < min) {
+            return min;
+        }
+        if (value > max) {
+            return max;
+        }
+        return value;
     }
 
     private void checkSpMinimumNeedsLower() {
@@ -882,6 +1016,20 @@ public class RandomizerGUI {
         batchRandomizationMenuItem = new JMenuItem();
         batchRandomizationMenuItem.setText(bundle.getString("GUI.batchRandomizationMenuItem.text"));
         settingsMenu.add(batchRandomizationMenuItem);
+
+        settingsMenu.addSeparator();
+        final JCheckBoxMenuItem darkModeMenuItem = new JCheckBoxMenuItem("Dark Mode");
+        darkModeMenuItem.setSelected(ThemeManager.isDarkMode());
+        darkModeMenuItem.addActionListener(e -> {
+            boolean wantDark = darkModeMenuItem.isSelected();
+            ThemeManager.setDarkMode(wantDark);
+            JOptionPane.showMessageDialog(
+                    frame,
+                    (wantDark ? "Dark mode" : "Light mode") + " will be applied next time you start the randomizer.",
+                    "Restart required",
+                    JOptionPane.INFORMATION_MESSAGE);
+        });
+        settingsMenu.add(darkModeMenuItem);
     }
 
     private void selectAndOpenRom() {
@@ -927,15 +1075,22 @@ public class RandomizerGUI {
                     if (results.wasOpeningSuccessful()) {
                         romHandler = results.getRomHandler();
                         if (!reinitialize) {
+                            ManualEditRegistry.getInstance().clear(); // fresh ROM -> drop prior manual edits
                             romLoaded();
                         }
                     } else {
+                        // The open failed; don't leave a previously-loaded handler active behind a
+                        // "No ROM loaded" UI (a later save/randomize would operate on the stale ROM).
+                        if (!reinitialize) {
+                            romHandler = null;
+                        }
                         reportOpenRomFailure(f, results);
                     }
                 });
             } catch (Exception e) {
                 SwingUtilities.invokeLater(() -> {
                     opDialog.setVisible(false);
+                    romHandler = null;
                     initialState();
                     attemptToLogException(e, "GUI.loadFailed", "GUI.loadFailedNoLog", null, null);
                 });
@@ -1080,6 +1235,20 @@ public class RandomizerGUI {
                 @Override
                 protected void done() {
                     super.done();
+                    // Surface any exception that escaped the background loop; SwingWorker otherwise
+                    // swallows it and we'd report success for a batch that actually crashed.
+                    try {
+                        get();
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                    } catch (java.util.concurrent.ExecutionException ee) {
+                        SwingUtilities.invokeLater(() -> batchProgressDialog.setVisible(false));
+                        Throwable cause = ee.getCause();
+                        Exception ex = (cause instanceof Exception) ? (Exception) cause : ee;
+                        attemptToLogException(ex, "GUI.saveFailed", "GUI.saveFailedNoLog", null, null);
+                        frame.setCursor(null);
+                        return;
+                    }
                     if (batchRandomizationSettings.shouldAutoAdvanceStartingIndex()) {
                         batchRandomizationSettings.setStartingIndex(i);
                         attemptWriteConfig();
@@ -1185,6 +1354,9 @@ public class RandomizerGUI {
     private void performRandomization(final String filename, final long seed,
             CustomNamesSet customNames, CustomPlayerGraphics cpg,
             boolean saveAsDirectory) {
+        // Editors hold the current RomHandler; close them so randomization (background thread,
+        // then a reload) can't race with / be invalidated by an open editor.
+        closeOpenEditorFrames();
         final Settings settings = createSettingsFromState(customNames);
         final boolean raceMode = settings.isRaceMode();
         final boolean batchRandomization = batchRandomizationSettings.isBatchRandomizationEnabled() && !presetMode;
@@ -1312,10 +1484,19 @@ public class RandomizerGUI {
         }
 
         // Done
+        // The manual edits were already written into the log produced above and baked into the
+        // randomized OUTPUT ROM. The handler is about to be reloaded from the ORIGINAL input ROM
+        // (reinitializeRomHandler / unload), which does NOT contain those edits, so clear the
+        // registry to keep it consistent with the live data and out of any later run's log.
+        ManualEditRegistry.getInstance().clear();
         if (this.unloadGameOnSuccess) {
             romHandler = null;
             initialState();
         } else {
+            // Same reasoning as the registry clear above: reloading the original ROM drops any manual
+            // type-effectiveness edit, so reset the flag/button (reinitialize skips initialState()).
+            typeEffectivenessManuallyEdited = false;
+            refreshTypeEditorButtonLabel();
             reinitializeRomHandler(false);
         }
 
@@ -1346,6 +1527,7 @@ public class RandomizerGUI {
             if (gameUpdates.containsKey(this.romHandler.getROMCode())) {
                 this.romHandler.loadGameUpdate(gameUpdates.get(this.romHandler.getROMCode()));
             }
+            ManualEditRegistry.getInstance().clear(); // fresh ROM from preset -> drop prior manual edits
             this.romLoaded();
             Settings settings;
             CustomPlayerGraphics customPlayerGraphics = null;
@@ -1661,6 +1843,16 @@ public class RandomizerGUI {
         pbsRandomRadioButton.setSelected(settings.getBaseStatisticsMod() == Settings.BaseStatisticsMod.RANDOM);
         pbsShuffleRadioButton.setSelected(settings.getBaseStatisticsMod() == Settings.BaseStatisticsMod.SHUFFLE);
         pbsUnchangedRadioButton.setSelected(settings.getBaseStatisticsMod() == Settings.BaseStatisticsMod.UNCHANGED);
+        if (pbsGatedRadioButton != null) {
+            pbsGatedRadioButton.setSelected(settings.getBaseStatisticsMod() == Settings.BaseStatisticsMod.GATED);
+            pbsGateDirectionComboBox.setSelectedIndex(settings.getGateDirection().ordinal());
+            pbsGateAmountStyleComboBox.setSelectedIndex(settings.getGateAmountStyle().ordinal());
+            pbsGateDistributionComboBox.setSelectedIndex(settings.getGateDistribution().ordinal());
+            pbsGateCeilingComboBox.setSelectedIndex(settings.getGateCeiling().ordinal());
+            pbsGateEvoHandlingComboBox.setSelectedIndex(settings.getGateEvoHandling().ordinal());
+            pbsGateThresholdSpinner.setValue(clampSpinnerValue(settings.getGateThreshold(), 100, 800));
+            pbsGateAmountSpinner.setValue(clampSpinnerValue(settings.getGateAmount(), 1, 255));
+        }
         pbsFollowEvolutionsCheckBox.setSelected(settings.isBaseStatsFollowEvolutions());
         pbsUpdateBaseStatsCheckBox.setSelected(settings.isUpdateBaseStats());
         pbsUpdateComboBox.setSelectedIndex(Math.max(0,
@@ -1738,9 +1930,13 @@ public class RandomizerGUI {
         }
 
         int[] customStarters = settings.getCustomStarters();
-        spComboBox1.setSelectedIndex(customStarters[0]);
-        spComboBox2.setSelectedIndex(customStarters[1]);
-        spComboBox3.setSelectedIndex(customStarters[2]);
+        // Guard against starter indexes that don't fit this ROM's combo boxes. Games with fewer
+        // starters than slots (e.g. Yellow has 2) never populate the extra combo box, so its only
+        // valid index is 0; applying a stored index > 0 would throw IllegalArgumentException.
+        int starterCount = romHandler.starterCount();
+        setStarterComboBoxIndex(spComboBox1, starterCount > 0 ? customStarters[0] : 0);
+        setStarterComboBoxIndex(spComboBox2, starterCount > 1 ? customStarters[1] : 0);
+        setStarterComboBoxIndex(spComboBox3, starterCount > 2 ? customStarters[2] : 0);
 
         peUnchangedRadioButton.setSelected(settings.getEvolutionsMod() == Settings.EvolutionsMod.UNCHANGED);
         peRandomRadioButton.setSelected(settings.getEvolutionsMod() == Settings.EvolutionsMod.RANDOM);
@@ -1991,6 +2187,18 @@ public class RandomizerGUI {
         this.enableOrDisableSubControls();
     }
 
+    /**
+     * Safely selects an index in a starter combo box, clamping to the box's actual item count.
+     * Combo boxes that were never populated for this ROM (e.g. the 3rd starter on Yellow) only
+     * contain a placeholder, so a stored index outside the model would throw.
+     */
+    private static void setStarterComboBoxIndex(JComboBox<String> comboBox, int index) {
+        if (index < 0 || index >= comboBox.getItemCount()) {
+            index = 0;
+        }
+        comboBox.setSelectedIndex(index);
+    }
+
     private Settings createSettingsFromState(CustomNamesSet customNames) {
         Settings settings = new Settings();
         settings.setRomName(this.romHandler.getROMName());
@@ -2011,6 +2219,23 @@ public class RandomizerGUI {
 
         settings.setBaseStatisticsMod(pbsUnchangedRadioButton.isSelected(), pbsShuffleRadioButton.isSelected(),
                 pbsRandomRadioButton.isSelected());
+        if (pbsGatedRadioButton != null && pbsGatedRadioButton.isSelected()) {
+            settings.setBaseStatisticsMod(Settings.BaseStatisticsMod.GATED);
+        }
+        if (pbsGatedRadioButton != null) {
+            settings.setGateDirection(
+                    Settings.GateDirection.values()[pbsGateDirectionComboBox.getSelectedIndex()]);
+            settings.setGateAmountStyle(
+                    Settings.GateAmountStyle.values()[pbsGateAmountStyleComboBox.getSelectedIndex()]);
+            settings.setGateDistribution(
+                    Settings.GateDistribution.values()[pbsGateDistributionComboBox.getSelectedIndex()]);
+            settings.setGateCeiling(
+                    Settings.GateCeiling.values()[pbsGateCeilingComboBox.getSelectedIndex()]);
+            settings.setGateEvoHandling(
+                    Settings.GateEvoHandling.values()[pbsGateEvoHandlingComboBox.getSelectedIndex()]);
+            settings.setGateThreshold((Integer) pbsGateThresholdSpinner.getValue());
+            settings.setGateAmount((Integer) pbsGateAmountSpinner.getValue());
+        }
         settings.setBaseStatsFollowEvolutions(pbsFollowEvolutionsCheckBox.isSelected());
         settings.setUpdateBaseStats(pbsUpdateBaseStatsCheckBox.isSelected() && pbsUpdateBaseStatsCheckBox.isVisible());
         settings.setUpdateBaseStatsToGeneration(
@@ -2310,36 +2535,46 @@ public class RandomizerGUI {
         try {
             String errlog = "error_" + ft.format(now) + ".txt";
             PrintStream ps = new PrintStream(new FileOutputStream(errlog));
-            ps.println("Randomizer Version: " + Version.VERSION_STRING);
-            if (seedString != null) {
-                ps.println("Seed: " + seedString);
-            }
-            if (settingsString != null) {
-                ps.println("Settings String: " + Version.VERSION + settingsString);
-            }
-            ps.println(
-                    "Java Version: " + System.getProperty("java.version") + ", " + System.getProperty("java.vm.name"));
+            // Restore System.err and close the log stream no matter what happens below, so a failure
+            // while writing diagnostics (e.g. when no ROM is loaded) can't leave stderr redirected to
+            // a stream we're about to close.
             PrintStream e1 = System.err;
-            System.setErr(ps);
-            if (this.romHandler != null) {
-                try {
-                    ps.println("ROM: " + romHandler.getROMName());
-                    ps.println("Code: " + romHandler.getROMCode());
-                    ps.println("Reported Support Level: " + romHandler.getSupportLevel());
-                    ps.println();
-                } catch (Exception ex2) {
-                    // Do nothing, just don't fail
+            try {
+                ps.println("Randomizer Version: " + Version.VERSION_STRING);
+                if (seedString != null) {
+                    ps.println("Seed: " + seedString);
                 }
+                if (settingsString != null) {
+                    ps.println("Settings String: " + Version.VERSION + settingsString);
+                }
+                ps.println("Java Version: " + System.getProperty("java.version") + ", "
+                        + System.getProperty("java.vm.name"));
+                System.setErr(ps);
+                if (this.romHandler != null) {
+                    try {
+                        ps.println("ROM: " + romHandler.getROMName());
+                        ps.println("Code: " + romHandler.getROMCode());
+                        ps.println("Reported Support Level: " + romHandler.getSupportLevel());
+                        ps.println();
+                    } catch (Exception ex2) {
+                        // Do nothing, just don't fail
+                    }
+                }
+                ex.printStackTrace();
+                ps.println();
+                ps.println("--ROM Diagnostics--");
+                if (this.romHandler != null) {
+                    if (!romHandler.isRomValid(null)) {
+                        ps.println(bundle.getString("Log.InvalidRomLoaded"));
+                    }
+                    romHandler.printRomDiagnostics(ps);
+                } else {
+                    ps.println("No ROM loaded.");
+                }
+            } finally {
+                System.setErr(e1);
+                ps.close();
             }
-            ex.printStackTrace();
-            ps.println();
-            ps.println("--ROM Diagnostics--");
-            if (!romHandler.isRomValid(null)) {
-                ps.println(bundle.getString("Log.InvalidRomLoaded"));
-            }
-            romHandler.printRomDiagnostics(ps);
-            System.setErr(e1);
-            ps.close();
             if (showMessage) {
                 JOptionPane.showMessageDialog(mainPanel,
                         String.format(bundle.getString(baseMessageKey), ex.getMessage(), errlog));
@@ -2417,6 +2652,10 @@ public class RandomizerGUI {
         refreshTypeEditorButtonLabel();
         updateTypeEditorButtonState(false);
 
+        // Disable all generation editor buttons so stale editor access can't survive an unload or a
+        // failed/unsupported ROM open. romLoaded() re-enables the one matching the loaded generation.
+        disableGenEditorButtons();
+
         setInitialButtonState(limitPokemonCheckBox, limitPokemonButton, noIrregularAltFormesCheckBox, raceModeCheckBox);
 
         currentRestrictions = null;
@@ -2431,6 +2670,10 @@ public class RandomizerGUI {
                 pbsLegendariesSlowRadioButton, pbsStrongLegendariesSlowRadioButton, pbsAllMediumFastRadioButton,
                 pbsStandardizeEXPCurvesCheckBox, pbsFollowEvolutionsCheckBox, pbsUpdateBaseStatsCheckBox,
                 pbsFollowMegaEvosCheckBox, pbsAssignEvoStatsRandomlyCheckBox);
+        if (pbsGatedRadioButton != null) {
+            setInitialButtonState(pbsGatedRadioButton);
+            setGateSubControlsEnabled(false);
+        }
         pbsEXPCurveComboBox.setVisible(true);
         pbsEXPCurveComboBox.setEnabled(false);
         pbsEXPCurveComboBox.setSelectedIndex(0);
@@ -2735,7 +2978,13 @@ public class RandomizerGUI {
     }
 
     private void romLoaded() {
-
+        // A (possibly different) ROM is now loaded; any editor window still open belongs to
+        // the previously loaded handler and would edit/save into a stale handler. Close them.
+        closeOpenEditorFrames();
+        // NOTE: the manual-edit registry is cleared by the genuine new-ROM entry
+        // points (openRom / preset load), NOT here. romLoaded() also runs on a
+        // settings (.rnqs) reload, which keeps the same ROM loaded and must preserve
+        // any edits already recorded so they still appear in the randomization log.
         try {
             int pokemonGeneration = romHandler.generationOfPokemon();
 
@@ -2775,6 +3024,9 @@ public class RandomizerGUI {
             pbsUnchangedRadioButton.setSelected(true);
             pbsShuffleRadioButton.setEnabled(true);
             pbsRandomRadioButton.setEnabled(true);
+            if (pbsGatedRadioButton != null) {
+                pbsGatedRadioButton.setEnabled(true);
+            }
 
             pbsStandardizeEXPCurvesCheckBox.setEnabled(true);
             pbsLegendariesSlowRadioButton.setSelected(true);
@@ -3148,9 +3400,7 @@ public class RandomizerGUI {
             boolean cpgReplaceChoiceSupport = cpgSupport && romHandler.hasMultiplePlayerCharacters();
             cpgSelection.setReplaceChoiceVisible(cpgReplaceChoiceSupport);
 
-            if (!(ppalSupport || cpgSupport)) {
-                tabbedPane1.setEnabledAt(8, false);
-            }
+            tabbedPane1.setEnabledAt(8, ppalSupport || cpgSupport);
 
             // Misc. Tweaks
             int mtsAvailable = romHandler.miscTweaksAvailable();
@@ -3197,6 +3447,8 @@ public class RandomizerGUI {
             gameMascotLabel.setIcon(makeMascotIcon());
 
             // Pokemon Editors - enable the appropriate generation button
+            gen1EditorButton.setEnabled(pokemonGeneration == 1);
+            gen2EditorButton.setEnabled(pokemonGeneration == 2);
             gen3EditorButton.setEnabled(pokemonGeneration == 3);
             gen4EditorButton.setEnabled(pokemonGeneration == 4);
             gen5EditorButton.setEnabled(pokemonGeneration == 5);
@@ -3320,6 +3572,11 @@ public class RandomizerGUI {
             disableAndDeselectButtons(pbsFollowEvolutionsCheckBox, pbsFollowMegaEvosCheckBox);
         } else {
             enableButtons(pbsFollowEvolutionsCheckBox, pbsFollowMegaEvosCheckBox);
+        }
+
+        // "Buff / gate base stats": sub-controls active only when the GATED radio is selected.
+        if (pbsGatedRadioButton != null) {
+            setGateSubControlsEnabled(pbsGatedRadioButton.isSelected());
         }
 
         if (pbsRandomRadioButton.isSelected()) {
@@ -3817,6 +4074,51 @@ public class RandomizerGUI {
         }
         updateTypeEditorButtonState(romHandler != null && romHandler.hasTypeEffectivenessSupport());
         refreshTypeEditorButtonLabel();
+        if (tpLevelCurveButton != null) {
+            tpLevelCurveButton.setEnabled(romHandler != null);
+        }
+    }
+
+    private void initLevelCurveButtonUI() {
+        if (tpPercentageLevelModifierCheckBox == null) {
+            return;
+        }
+        if (tpLevelCurveButton != null) {
+            return;
+        }
+        JPanel trainerPanel = (JPanel) SwingUtilities.getAncestorOfClass(JPanel.class,
+                tpPercentageLevelModifierCheckBox);
+        if (trainerPanel == null) {
+            return;
+        }
+        tpLevelCurveButton = new JButton("Adjust Level Curve (Gyms / E4 / Champion)…");
+        tpLevelCurveButton.setToolTipText(
+                "<html>Reshape the level progression of gym leaders, the Elite Four and the champion "
+                        + "(widen/narrow the gaps, normalize a messy curve, or set each level by hand).</html>");
+        tpLevelCurveButton.setEnabled(false);
+        tpLevelCurveButton.addActionListener(e -> openLevelCurveDialog());
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 1;
+        gbc.gridy = 99; // explicit bottom row (RELATIVE could land in an occupied cell)
+        gbc.gridwidth = GridBagConstraints.REMAINDER;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.insets = new Insets(12, 0, 0, 0);
+
+        trainerPanel.add(tpLevelCurveButton, gbc);
+        trainerPanel.revalidate();
+        trainerPanel.repaint();
+    }
+
+    private void openLevelCurveDialog() {
+        if (romHandler == null) {
+            JOptionPane.showMessageDialog(frame, "Load a ROM first.", "No ROM loaded",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        TrainerLevelCurveDialog dialog = new TrainerLevelCurveDialog(frame, romHandler);
+        dialog.setVisible(true);
     }
 
     private void initTypeEffectivenessEditorUI() {
@@ -3839,9 +4141,12 @@ public class RandomizerGUI {
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.gridx = 1;
-        gbc.gridy = GridBagConstraints.RELATIVE;
-        gbc.gridwidth = 3;
+        // Explicit bottom row: RELATIVE could land in a cell already occupied
+        // by form components, overlapping/clipping the button.
+        gbc.gridy = 99;
+        gbc.gridwidth = GridBagConstraints.REMAINDER;
         gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.NONE;
         gbc.insets = new Insets(10, 0, 0, 0);
 
         typeEffectivenessPanel.add(teManualEditButton, gbc);
@@ -3897,7 +4202,11 @@ public class RandomizerGUI {
         }
 
         Window owner = SwingUtilities.getWindowAncestor(mainPanel);
-        TypeEffectivenessEditorDialog dialog = new TypeEffectivenessEditorDialog(owner, bundle, currentTable);
+        // Offer ZERO (immunity) only on ROMs that actually persist newly-added immunities, so the
+        // editor never exposes a silent no-op. All current supported gens (1-6) round-trip ZERO.
+        boolean allowImmunities = romHandler.hasTypeImmunityEditSupport();
+        TypeEffectivenessEditorDialog dialog = new TypeEffectivenessEditorDialog(owner, bundle, currentTable,
+                allowImmunities);
         dialog.setVisible(true);
 
         if (dialog.wasSaved()) {
@@ -3909,6 +4218,9 @@ public class RandomizerGUI {
                 return;
             }
             typeEffectivenessManuallyEdited = true;
+            // Record the edit so it appears in the manual-edit log (parity with the editor sheets).
+            ManualEditRegistry.getInstance().addEntry("Type Effectiveness",
+                    "Type effectiveness chart manually edited via the Type Editor");
             teUnchangedRadioButton.setSelected(true);
             teAddRandomImmunitiesCheckBox.setSelected(false);
             refreshTypeEditorButtonLabel();
@@ -3949,7 +4261,20 @@ public class RandomizerGUI {
         c.gridwidth = 2;
         pokemonEditorsPanel.add(descriptionLabel, c);
 
-        // Create buttons for each generation
+        // Create buttons for each generation.
+        // Gen 1/2 use hardcoded text/tooltips on purpose: the bundle has no
+        // GUI.gen1EditorButton.* / GUI.gen2EditorButton.* keys, so bundle.getString
+        // would throw MissingResourceException.
+        gen1EditorButton = new JButton("Gen 1 Editor");
+        gen1EditorButton.setToolTipText("Edit Pokemon, moves, learnsets, evolutions, TMs and trainers for Generation 1 (Red/Blue/Yellow) games.");
+        gen1EditorButton.setEnabled(false);
+        gen1EditorButton.addActionListener(e -> openGen1Editor());
+
+        gen2EditorButton = new JButton("Gen 2 Editor");
+        gen2EditorButton.setToolTipText("Edit Pokemon, moves, learnsets, evolutions, egg moves, TMs and trainers for Generation 2 (Gold/Silver/Crystal) games.");
+        gen2EditorButton.setEnabled(false);
+        gen2EditorButton.addActionListener(e -> openGen2Editor());
+
         gen3EditorButton = new JButton(bundle.getString("GUI.gen3EditorButton.text"));
         gen3EditorButton.setToolTipText(bundle.getString("GUI.gen3EditorButton.toolTipText"));
         gen3EditorButton.setEnabled(false);
@@ -3980,25 +4305,32 @@ public class RandomizerGUI {
         c.gridy = 1;
 
         c.gridx = 0;
+        pokemonEditorsPanel.add(gen1EditorButton, c);
+
+        c.gridx = 1;
+        pokemonEditorsPanel.add(gen2EditorButton, c);
+
+        c.gridy = 2;
+        c.gridx = 0;
         pokemonEditorsPanel.add(gen3EditorButton, c);
 
         c.gridx = 1;
         pokemonEditorsPanel.add(gen4EditorButton, c);
 
-        c.gridy = 2;
+        c.gridy = 3;
         c.gridx = 0;
         pokemonEditorsPanel.add(gen5EditorButton, c);
 
         c.gridx = 1;
         pokemonEditorsPanel.add(gen6EditorButton, c);
 
-        c.gridy = 3;
+        c.gridy = 4;
         c.gridx = 0;
         c.gridwidth = 2;
         pokemonEditorsPanel.add(gen7EditorButton, c);
 
         // Add vertical glue to push everything to the top
-        c.gridy = 4;
+        c.gridy = 5;
         c.weighty = 1.0;
         pokemonEditorsPanel.add(Box.createVerticalGlue(), c);
 
@@ -4007,6 +4339,112 @@ public class RandomizerGUI {
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         tabbedPane1.addTab(bundle.getString("GUI.pokemonEditorsPanel.title"), scrollPane);
+
+        // Wrap tabs onto extra rows instead of hiding them behind scroll arrows
+        // when the window is too narrow to fit them all.
+        tabbedPane1.setTabLayoutPolicy(JTabbedPane.WRAP_TAB_LAYOUT);
+    }
+
+    /**
+     * Disposes any open Gen3-7 editor window. Called before the main window replaces the
+     * RomHandler (new ROM / preset / post-randomize reload) and before randomization runs,
+     * so an editor can't keep editing or saving into a stale/orphaned handler, and so a
+     * background randomize can't mutate the live data an editor is rendering on the EDT.
+     * dispose() does NOT fire windowClosing, so no panel-revert runs — live edits already
+     * applied to the handler are preserved for the save/randomize in progress.
+     */
+    private void closeOpenEditorFrames() {
+        // Disposing Swing windows must happen on the EDT. Batch randomization calls this from a
+        // background SwingWorker thread, so marshal onto the EDT (and wait, so editors are gone
+        // before randomization mutates the shared data).
+        if (!SwingUtilities.isEventDispatchThread()) {
+            try {
+                SwingUtilities.invokeAndWait(this::closeOpenEditorFrames);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            } catch (java.lang.reflect.InvocationTargetException ite) {
+                ite.printStackTrace();
+            }
+            return;
+        }
+        for (java.awt.Window w : java.awt.Window.getWindows()) {
+            String cn = w.getClass().getName();
+            if (w.isDisplayable() && cn.startsWith("com.dabomstew.pkrandom.pokemon.editors.")
+                    && cn.endsWith("EditorFrame")) {
+                w.dispose();
+            }
+        }
+        // The editors are gone; drop the shared editor data cache so it doesn't pin the old
+        // RomHandler + its maps (a later editor rebuilds it against the current ROM).
+        com.dabomstew.pkrandom.pokemon.editors.EditorDataCache.clear();
+    }
+
+    /**
+     * Disables every generation editor button. Null-safe so it can be called from {@code initialState()}
+     * even before {@code initPokemonEditorsPanel()} has created the buttons.
+     */
+    private void disableGenEditorButtons() {
+        JButton[] genEditorButtons = { gen1EditorButton, gen2EditorButton, gen3EditorButton, gen4EditorButton,
+                gen5EditorButton, gen6EditorButton, gen7EditorButton };
+        for (JButton button : genEditorButtons) {
+            if (button != null) {
+                button.setEnabled(false);
+            }
+        }
+    }
+
+    private void openGen1Editor() {
+        if (romHandler == null) {
+            JOptionPane.showMessageDialog(frame,
+                    "No ROM loaded. Please load a Gen 1 ROM first.",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (!(romHandler instanceof com.dabomstew.pkromio.romhandlers.Gen1RomHandler)) {
+            JOptionPane.showMessageDialog(frame,
+                    "Loaded ROM is not a Generation 1 title.",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                com.dabomstew.pkrandom.pokemon.editors.Gen1EditorFrame editor = new com.dabomstew.pkrandom.pokemon.editors.Gen1EditorFrame(
+                        romHandler);
+                editor.setVisible(true);
+            }
+        });
+    }
+
+    private void openGen2Editor() {
+        if (romHandler == null) {
+            JOptionPane.showMessageDialog(frame,
+                    "No ROM loaded. Please load a Gen 2 ROM first.",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        if (!(romHandler instanceof com.dabomstew.pkromio.romhandlers.Gen2RomHandler)) {
+            JOptionPane.showMessageDialog(frame,
+                    "Loaded ROM is not a Generation 2 title.",
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                com.dabomstew.pkrandom.pokemon.editors.Gen2EditorFrame editor = new com.dabomstew.pkrandom.pokemon.editors.Gen2EditorFrame(
+                        romHandler);
+                editor.setVisible(true);
+            }
+        });
     }
 
     private void openGen3Editor() {
@@ -4358,10 +4796,12 @@ public class RandomizerGUI {
                                     .setAutoAdvanceStartingIndex(Boolean.parseBoolean(tokens[1].trim()));
 
                         } else if (key.equals("batchrandomization.numberofrandomizedroms")) {
-                            batchRandomizationSettings.setNumberOfRandomizedROMs(Integer.parseInt(tokens[1].trim()));
+                            batchRandomizationSettings.setNumberOfRandomizedROMs(parseIntOrDefault(tokens[1].trim(),
+                                    batchRandomizationSettings.getNumberOfRandomizedROMs()));
 
                         } else if (key.equals("batchrandomization.startingindex")) {
-                            batchRandomizationSettings.setStartingIndex(Integer.parseInt(tokens[1].trim()));
+                            batchRandomizationSettings.setStartingIndex(parseIntOrDefault(tokens[1].trim(),
+                                    batchRandomizationSettings.getStartingIndex()));
 
                         } else if (key.equals("batchrandomization.filenameprefix")) {
                             batchRandomizationSettings.setFileNamePrefix(tokens[1].trim());
@@ -4381,6 +4821,20 @@ public class RandomizerGUI {
             sc.close();
         } catch (IOException ex) {
             ex.printStackTrace();
+        }
+    }
+
+    /**
+     * Parses an int from config text, returning {@code defaultValue} (and logging) if the value is
+     * malformed. Keeps a corrupt config.ini from throwing {@link NumberFormatException} during GUI
+     * construction.
+     */
+    private static int parseIntOrDefault(String value, int defaultValue) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException ex) {
+            System.err.println("Invalid numeric config value \"" + value + "\"; using default " + defaultValue);
+            return defaultValue;
         }
     }
 
@@ -4447,6 +4901,8 @@ public class RandomizerGUI {
     }
 
     public static void main(String[] args) {
+        // Retained no-op (kept for call-site stability); FlatLaf manages fonts/AA/HiDPI itself.
+        ThemeManager.initFontRendering();
         setRootPath();
 
         String firstCliArg = args.length > 0 ? args[0] : "";
@@ -4462,18 +4918,8 @@ public class RandomizerGUI {
                 usedLauncher = true;
             SwingUtilities.invokeLater(() -> {
                 frame = new JFrame("RandomizerGUI");
-                try {
-                    String lafName = javax.swing.UIManager.getSystemLookAndFeelClassName();
-                    // NEW: Only set Native LaF on windows.
-                    if (lafName.equalsIgnoreCase("com.sun.java.swing.plaf.windows.WindowsLookAndFeel")) {
-                        javax.swing.UIManager.setLookAndFeel(lafName);
-                    }
-                } catch (ClassNotFoundException | InstantiationException | UnsupportedLookAndFeelException
-                        | IllegalAccessException ex) {
-                    java.util.logging.Logger.getLogger(RandomizerGUI.class.getName()).log(
-                            java.util.logging.Level.SEVERE, null,
-                            ex);
-                }
+                // Applies the saved light/dark preference (light = native LaF on Windows, as before)
+                ThemeManager.applyTheme();
                 frame.setContentPane(new RandomizerGUI().mainPanel);
                 frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
                 frame.pack();

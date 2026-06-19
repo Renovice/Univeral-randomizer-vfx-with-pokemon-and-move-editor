@@ -1207,7 +1207,7 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
             // "Special" trainer
             tr.poketype = 1;
             offset++;
-            while (rom[offset] != 0x0) {
+            while (offset < rom.length && rom[offset] != 0x0) {
                 TrainerPokemon tp = new TrainerPokemon();
                 tp.setLevel(rom[offset] & 0xFF);
                 tp.setSpecies(pokes[pokeRBYToNumTable[rom[offset + 1] & 0xFF]]);
@@ -1217,13 +1217,16 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         } else {
             tr.poketype = 0;
             offset++;
-            while (rom[offset] != 0x0) {
+            while (offset < rom.length && rom[offset] != 0x0) {
                 TrainerPokemon tp = new TrainerPokemon();
                 tp.setLevel(dataType);
                 tp.setSpecies(pokes[pokeRBYToNumTable[rom[offset] & 0xFF]]);
                 tr.pokemon.add(tp);
                 offset++;
             }
+        }
+        if (offset >= rom.length) {
+            throw new RomIOException("Reached end of ROM while reading trainer data.");
         }
         return tr;
     }
@@ -1399,6 +1402,9 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         int currentOffset = romEntry.getIntValue("TypeEffectivenessOffset");
         int attackingType = rom[currentOffset];
         while (attackingType != GBConstants.typeTableTerminator) {
+            if (currentOffset + 2 >= rom.length) {
+                throw new RomIOException("Reached end of ROM while reading the type effectiveness table.");
+            }
             int defendingType = rom[currentOffset + 1];
             int effectivenessInternal = rom[currentOffset + 2];
             Type attacking = Gen1Constants.typeTable[attackingType];
@@ -1570,6 +1576,9 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         }
 
         public void setLevel(byte[] rom, int level, int i) {
+            if (levelOffsets.length <= i) {
+                return;
+            }
             rom[levelOffsets[i]] = (byte) level;
         }
 
@@ -1955,7 +1964,7 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
                 prices.set(i, price);
             // ...and for TMs, in a separate data structure.
             } else if (item.isTM()) {
-                int offset = tmPricesOffset + (ItemIDs.tm01 - i) / 2;
+                int offset = tmPricesOffset + (i - ItemIDs.tm01) / 2;
                 int price = readNybble(offset, i % 2 == 1) * 1000;
                 prices.set(i, price);
             }
@@ -1996,7 +2005,7 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
                 write3ByteDecimalHex(offset, prices.get(i));
             // ...and for TMs, in a separate data structure.
             } else if (item.isTM()) {
-                int offset = tmPricesOffset + (ItemIDs.tm01 - i) / 2;
+                int offset = tmPricesOffset + (i - ItemIDs.tm01) / 2;
                 int price = prices.get(i) / 1000;
                 writeNybble(offset, i % 2 == 1, price);
             }
@@ -2586,7 +2595,7 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         // external names
         List<Integer> usedExternal = new ArrayList<>();
         for (int i = 0; i < 0x25; i++) {
-            int externalOffset = readPointer(mapNameTableOffset + 1);
+            int externalOffset = readPointer(mapNameTableOffset + 1, rom[mapNameTableOffset] & 0xFF);
             usedExternal.add(externalOffset);
             mapNames[i] = readVariableLengthString(externalOffset, false);
             mapNameTableOffset += 3;
@@ -2597,7 +2606,7 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         Map<Integer, Integer> previousMapCounts = new HashMap<>();
         while ((rom[mapNameTableOffset] & 0xFF) != 0xFF) {
             int maxMap = rom[mapNameTableOffset] & 0xFF;
-            int nameOffset = readPointer(mapNameTableOffset + 2);
+            int nameOffset = readPointer(mapNameTableOffset + 2, rom[mapNameTableOffset + 1] & 0xFF);
             String actualName = readVariableLengthString(nameOffset, false).trim();
             if (usedExternal.contains(nameOffset)) {
                 for (int i = lastMaxMap; i < maxMap; i++) {
@@ -2675,12 +2684,15 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         int hiRoutine = romEntry.getIntValue("HiddenItemRoutine");
         List<Integer> itemOffsets = new ArrayList<>();
 
-        while ((rom[offset] & 0xFF) != Gen1Constants.hiddenObjectsTerminator) {
+        while (offset + 4 < rom.length && (rom[offset] & 0xFF) != Gen1Constants.hiddenObjectsTerminator) {
             int routineOffset = readPointer(offset + 4, rom[offset + 3] & 0xFF);
             if (routineOffset == hiRoutine) {
                 itemOffsets.add(offset + 2);
             }
             offset += 6;
+        }
+        if (offset + 4 >= rom.length) {
+            throw new RomIOException("Reached end of ROM while reading hidden items.");
         }
 
         return itemOffsets;
@@ -2853,7 +2865,9 @@ public class Gen1RomHandler extends AbstractGBCRomHandler {
         List<MoveLearnt> moveset = movesets.get(pk.getNumber());
         for (int i = 0; i < moveset.size(); i++) {
             MoveLearnt ml = moveset.get(i);
-            if (i <= 4 && ml.level == 1) continue;
+            // 4-byte base-stats level-1 slot holds moveset indices 0..3 only;
+            // skip exactly those to match movesetToLevel1MoveBytes (avoids dropping a level-1 move at index 4).
+            if (i < 4 && ml.level == 1) continue;
             byte[] mlBytes = moveLearntToBytes(ml);
             baos.write(mlBytes, 0, mlBytes.length);
         }

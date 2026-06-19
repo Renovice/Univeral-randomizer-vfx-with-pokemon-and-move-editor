@@ -21,16 +21,42 @@ final class TableLayoutDefaults {
 
     static final Font CELL_FONT = new Font("Segoe UI", Font.PLAIN, 12);
     static final Font HEADER_FONT = new Font("Segoe UI", Font.BOLD, 11);
-    static final Color HEADER_BG = new Color(245, 245, 245);
-    static final Color HEADER_FG = new Color(60, 60, 60);
-    static final Color GRID_COLOR = new Color(230, 230, 230);
-    static final Color SELECTION_BG = new Color(184, 207, 229);
-    static final Color SELECTION_FG = Color.BLACK;
     static final int HEADER_HEIGHT = 60;
 
-    static final Color EVEN_ROW_COLOR = Color.WHITE;
-    static final Color ODD_ROW_COLOR = new Color(250, 250, 250);
-    static final Color FROZEN_ROW_COLOR = new Color(245, 245, 245);
+    // Colors are resolved through EditorTheme at call time so the sheets
+    // follow the light/dark theme. Renderers calling these per paint pick up
+    // a theme switch live; values captured at construction apply on reopen.
+    static Color headerBg() {
+        return EditorTheme.headerBg();
+    }
+
+    static Color headerFg() {
+        return EditorTheme.strongText();
+    }
+
+    static Color gridColor() {
+        return EditorTheme.grid();
+    }
+
+    static Color selectionBg() {
+        return EditorTheme.selectionBg();
+    }
+
+    static Color selectionFg() {
+        return EditorTheme.selectionFg();
+    }
+
+    static Color evenRowColor() {
+        return EditorTheme.surface();
+    }
+
+    static Color oddRowColor() {
+        return EditorTheme.altRow();
+    }
+
+    static Color frozenRowColor() {
+        return EditorTheme.frozenRow();
+    }
 
     private static final int ROW_HEIGHT_ICON = 64;
     private static final int ROW_HEIGHT_TEXT = 52;
@@ -46,9 +72,11 @@ final class TableLayoutDefaults {
     static void applyBaseTableSettings(JTable table) {
         table.setFont(CELL_FONT);
         table.setShowGrid(true);
-        table.setGridColor(GRID_COLOR);
-        table.setSelectionBackground(SELECTION_BG);
-        table.setSelectionForeground(SELECTION_FG);
+        table.setGridColor(gridColor());
+        table.setBackground(EditorTheme.surface());
+        table.setForeground(EditorTheme.text());
+        table.setSelectionBackground(selectionBg());
+        table.setSelectionForeground(selectionFg());
         table.setFillsViewportHeight(true);
         table.setIntercellSpacing(new Dimension(1, 1));
         table.setCellSelectionEnabled(true);
@@ -116,9 +144,9 @@ final class TableLayoutDefaults {
             return;
         }
         header.setFont(HEADER_FONT);
-        header.setBackground(HEADER_BG);
-        header.setForeground(HEADER_FG);
-        header.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, new Color(200, 200, 200)));
+        header.setBackground(headerBg());
+        header.setForeground(headerFg());
+        header.setBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, EditorTheme.border()));
         header.setReorderingAllowed(false);
         Dimension pref = header.getPreferredSize();
         header.setPreferredSize(new Dimension(pref != null ? pref.width : 0, HEADER_HEIGHT));
@@ -152,16 +180,17 @@ final class TableLayoutDefaults {
             setHorizontalAlignment(SwingConstants.CENTER);
             setVerticalAlignment(SwingConstants.CENTER);
             setFont(HEADER_FONT);
-            setBackground(HEADER_BG);
-            setForeground(HEADER_FG);
-            setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createMatteBorder(0, 0, 1, 1, new Color(200, 200, 200)),
-                    new EmptyBorder(6, 6, 6, 6)));
         }
 
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
                 boolean isSelected, boolean hasFocus, int row, int column) {
+            // Colors resolved per paint so headers follow theme switches live.
+            setBackground(headerBg());
+            setForeground(headerFg());
+            setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 1, 1, EditorTheme.border()),
+                    new EmptyBorder(6, 6, 6, 6)));
             if (value != null) {
                 String text = value.toString();
                 if (!text.startsWith("<html>")) {
@@ -233,11 +262,11 @@ final class TableLayoutDefaults {
 
             if (!isSelected) {
                 if (isFrozen) {
-                    c.setBackground(FROZEN_ROW_COLOR);
+                    c.setBackground(frozenRowColor());
                 } else {
-                    c.setBackground(row % 2 == 0 ? EVEN_ROW_COLOR : ODD_ROW_COLOR);
+                    c.setBackground(row % 2 == 0 ? evenRowColor() : oddRowColor());
                 }
-                c.setForeground(Color.BLACK);
+                c.setForeground(EditorTheme.text());
             }
 
             setBorder(noFocusBorder);

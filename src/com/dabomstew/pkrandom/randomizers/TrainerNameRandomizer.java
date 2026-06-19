@@ -204,10 +204,21 @@ public class TrainerNameRandomizer extends Randomizer {
                 }
                 String changeTo = trainerClassName;
                 if (pickFrom != null && !pickFrom.isEmpty()) {
-                    changeTo = pickFrom.get(random.nextInt(pickFrom.size()));
-                    while (changeTo.length() > maxLength) {
-                        changeTo = pickFrom.get(random.nextInt(pickFrom.size()));
+                    // Only consider names that actually fit this class's length limit.
+                    // Use internalStringLength (matching the bucketing above) rather than
+                    // String.length(), since they can differ for some encodings.
+                    // Filtering up front (instead of a retry loop) also avoids hanging
+                    // forever when no candidate fits.
+                    List<String> fitting = new ArrayList<>();
+                    for (String candidate : pickFrom) {
+                        if (romHandler.internalStringLength(candidate) <= maxLength) {
+                            fitting.add(candidate);
+                        }
                     }
+                    if (!fitting.isEmpty()) {
+                        changeTo = fitting.get(random.nextInt(fitting.size()));
+                    }
+                    // else: no custom class name fits this slot; keep the original.
                 }
                 translation.put(trainerClassName, changeTo);
                 newClassNames.add(changeTo);

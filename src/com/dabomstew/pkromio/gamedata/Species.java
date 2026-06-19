@@ -562,17 +562,20 @@ public class Species implements Comparable<Species> {
             return formeNumber;
         }
 
-        int num = random.nextInt(cosmeticForms);
-        if (num == cosmeticForms) {
-            return formeNumber;
-        }
-
         if(!realCosmeticFormNumbers.isEmpty()) {
-            if(num > realCosmeticFormNumbers.size()) {
-                throw new IllegalStateException("Not all cosmetic formes listed in cosmeticFormeNumbers!");
+            // realCosmeticFormNumbers does NOT include the base forme, so add it as an explicit
+            // candidate: pick from [0, size], where the extra top value represents the base forme
+            // itself. This ensures the base forme can be selected, as documented ("including itself").
+            int num = random.nextInt(realCosmeticFormNumbers.size() + 1);
+            if (num == realCosmeticFormNumbers.size()) {
+                return formeNumber;
             }
             return realCosmeticFormNumbers.get(num);
         } else {
+            // The cosmetic formes are numbered contiguously starting at formeNumber, so
+            // formeNumber + num (num in [0, cosmeticForms - 1]) already covers both the base forme
+            // (num == 0) and all of its cosmetic formes.
+            int num = random.nextInt(cosmeticForms);
             return formeNumber + num;
         }
     }

@@ -799,8 +799,10 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 
 		// Additional fields
 		pkmn.setRunChance(stats[Gen4Constants.bsRunChanceOffset] & 0xFF);
-		pkmn.setColor(stats[Gen4Constants.bsColorOffset] & 0xFF);
-		pkmn.setFlip((stats[Gen4Constants.bsFlipOffset] & 0xFF) != 0);
+		// Pokedex color (bits 0-6) and sprite-flip flag (bit 7) share the same byte.
+		int colorFlip = stats[Gen4Constants.bsColorOffset] & 0xFF;
+		pkmn.setColor(colorFlip & 0x7F);
+		pkmn.setFlip((colorFlip & 0x80) != 0);
 
 		int cosmeticForms = Gen4Constants.cosmeticForms.getOrDefault(pkmn.getNumber(), 0);
 		if (cosmeticForms > 0 && romEntry.getRomType() != Gen4Constants.Type_DP) {
@@ -945,20 +947,20 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 	}
 
 	private void saveBasicPokeStats(Species pkmn, byte[] stats) {
-		stats[Gen4Constants.bsHPOffset] = (byte) pkmn.getHp();
-		stats[Gen4Constants.bsAttackOffset] = (byte) pkmn.getAttack();
-		stats[Gen4Constants.bsDefenseOffset] = (byte) pkmn.getDefense();
-		stats[Gen4Constants.bsSpeedOffset] = (byte) pkmn.getSpeed();
-		stats[Gen4Constants.bsSpAtkOffset] = (byte) pkmn.getSpatk();
-		stats[Gen4Constants.bsSpDefOffset] = (byte) pkmn.getSpdef();
+		stats[Gen4Constants.bsHPOffset] = (byte) clamp(pkmn.getHp(), 0, 255);
+		stats[Gen4Constants.bsAttackOffset] = (byte) clamp(pkmn.getAttack(), 0, 255);
+		stats[Gen4Constants.bsDefenseOffset] = (byte) clamp(pkmn.getDefense(), 0, 255);
+		stats[Gen4Constants.bsSpeedOffset] = (byte) clamp(pkmn.getSpeed(), 0, 255);
+		stats[Gen4Constants.bsSpAtkOffset] = (byte) clamp(pkmn.getSpatk(), 0, 255);
+		stats[Gen4Constants.bsSpDefOffset] = (byte) clamp(pkmn.getSpdef(), 0, 255);
 		stats[Gen4Constants.bsPrimaryTypeOffset] = Gen4Constants.typeToByte(pkmn.getPrimaryType(false));
 		if (pkmn.getSecondaryType(false) == null) {
 			stats[Gen4Constants.bsSecondaryTypeOffset] = stats[Gen4Constants.bsPrimaryTypeOffset];
 		} else {
 			stats[Gen4Constants.bsSecondaryTypeOffset] = Gen4Constants.typeToByte(pkmn.getSecondaryType(false));
 		}
-		stats[Gen4Constants.bsCatchRateOffset] = (byte) pkmn.getCatchRate();
-		stats[Gen4Constants.bsExpYieldOffset] = (byte) pkmn.getExpYield();
+		stats[Gen4Constants.bsCatchRateOffset] = (byte) clamp(pkmn.getCatchRate(), 0, 255);
+		stats[Gen4Constants.bsExpYieldOffset] = (byte) clamp(pkmn.getExpYield(), 0, 255);
 
 		// EV Yields - pack into 2 bytes (10-11) with 2 bits per stat like Gen5
 		int evByte1 = (pkmn.getHpEvYield() & 0b11) |
@@ -981,23 +983,23 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 					pkmn.getRareHeldItem() == null ? 0 : pkmn.getRareHeldItem().getId());
 		}
 
-		stats[Gen4Constants.bsGenderRatioOffset] = (byte) pkmn.getGenderRatio();
-		stats[Gen4Constants.bsHatchCyclesOffset] = (byte) pkmn.getCallRate(); // Hatch cycles
-		stats[Gen4Constants.bsBaseHappinessOffset] = (byte) pkmn.getBaseHappiness();
+		stats[Gen4Constants.bsGenderRatioOffset] = (byte) clamp(pkmn.getGenderRatio(), 0, 255);
+		stats[Gen4Constants.bsHatchCyclesOffset] = (byte) clamp(pkmn.getCallRate(), 0, 255); // Hatch cycles
+		stats[Gen4Constants.bsBaseHappinessOffset] = (byte) clamp(pkmn.getBaseHappiness(), 0, 255);
 		stats[Gen4Constants.bsGrowthCurveOffset] = pkmn.getGrowthCurve().toByte();
 
 		// Egg Groups
-		stats[Gen4Constants.bsEggGroup1Offset] = (byte) pkmn.getEggGroup1();
-		stats[Gen4Constants.bsEggGroup2Offset] = (byte) pkmn.getEggGroup2();
+		stats[Gen4Constants.bsEggGroup1Offset] = (byte) clamp(pkmn.getEggGroup1(), 0, 255);
+		stats[Gen4Constants.bsEggGroup2Offset] = (byte) clamp(pkmn.getEggGroup2(), 0, 255);
 
 		// Abilities
-		stats[Gen4Constants.bsAbility1Offset] = (byte) pkmn.getAbility1();
-		stats[Gen4Constants.bsAbility2Offset] = (byte) pkmn.getAbility2();
+		stats[Gen4Constants.bsAbility1Offset] = (byte) clamp(pkmn.getAbility1(), 0, 255);
+		stats[Gen4Constants.bsAbility2Offset] = (byte) clamp(pkmn.getAbility2(), 0, 255);
 
 		// Additional fields
-		stats[Gen4Constants.bsRunChanceOffset] = (byte) pkmn.getRunChance();
-		stats[Gen4Constants.bsColorOffset] = (byte) pkmn.getColor();
-		stats[Gen4Constants.bsFlipOffset] = (byte) (pkmn.isFlip() ? 1 : 0);
+		stats[Gen4Constants.bsRunChanceOffset] = (byte) clamp(pkmn.getRunChance(), 0, 255);
+		// Pokedex color (bits 0-6) and sprite-flip flag (bit 7) share the same byte.
+		stats[Gen4Constants.bsColorOffset] = (byte) ((pkmn.getColor() & 0x7F) | (pkmn.isFlip() ? 0x80 : 0));
 	}
 
 	@Override
@@ -3315,6 +3317,16 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 	}
 
 	private void writeEggMoves(Map<Integer, List<Integer>> eggMoves, byte[] data, int startingOffset) {
+		// Bound writes to the original egg-move table region (up to and including its 0xFFFF
+		// terminator) so an enlarged set cannot overwrite adjacent overlay code/data. For
+		// count-preserving data this equals the original extent and changes nothing.
+		int limit = data.length;
+		for (int scan = startingOffset; scan + 2 <= data.length; scan += 2) {
+			if (FileFunctions.read2ByteInt(data, scan) == 0xFFFF) {
+				limit = scan + 2;
+				break;
+			}
+		}
 		int currentOffset = startingOffset;
 		List<Integer> speciesList = new ArrayList<>(eggMoves.keySet());
 		Collections.sort(speciesList);
@@ -3323,20 +3335,20 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 			if (moves == null || moves.isEmpty()) {
 				continue;
 			}
-			if (currentOffset + 2 > data.length) {
+			if (currentOffset + 2 > limit) {
 				break;
 			}
 			FileFunctions.write2ByteInt(data, currentOffset, species + 20000);
 			currentOffset += 2;
 			for (int move : moves) {
-				if (currentOffset + 2 > data.length) {
+				if (currentOffset + 2 > limit) {
 					break;
 				}
 				FileFunctions.write2ByteInt(data, currentOffset, move);
 				currentOffset += 2;
 			}
 		}
-		if (currentOffset + 2 <= data.length) {
+		if (currentOffset + 2 <= limit) {
 			FileFunctions.write2ByteInt(data, currentOffset, 0xFFFF);
 		}
 	}
@@ -4024,7 +4036,14 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 		for (Map.Entry<Species, boolean[]> compatEntry : compatData.entrySet()) {
 			Species pkmn = compatEntry.getKey();
 			boolean[] flags = compatEntry.getValue();
-			byte[] data = pokeNarc.files.get(pkmn.getNumber());
+			// Mirror getTMHMCompatibility's read logic: alt formes live at index
+			// number+formeOffset in the personal NARC, base species at number.
+			byte[] data;
+			if (pkmn.getNumber() > Gen4Constants.pokemonCount) {
+				data = pokeNarc.files.get(pkmn.getNumber() + Gen4Constants.formeOffset);
+			} else {
+				data = pokeNarc.files.get(pkmn.getNumber());
+			}
 			for (int j = 0; j < 13; j++) {
 				data[Gen4Constants.bsTMHMCompatOffset + j] = getByteFromFlags(flags, j * 8 + 1);
 			}

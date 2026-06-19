@@ -189,6 +189,8 @@ public class ItemRandomizer extends Randomizer {
 
         List<Shop> shops = deepCopy(romHandler.getShops());
 
+        validateShopRandomization(possible, guaranteed, shops);
+
         List<Item> newItems = setupNewItems(possible, guaranteed, shops);
 
         placeNewItems(newItems, shops, guaranteed);
@@ -226,6 +228,53 @@ public class ItemRandomizer extends Randomizer {
         List<Shop> copy = new ArrayList<>(original.size());
         original.forEach(shop -> copy.add(new Shop(shop)));
         return copy;
+    }
+
+    /**
+     * Checks up front whether the requested shop randomization is actually achievable, throwing a
+     * {@link RandomizationException} with a clear message instead of letting placement fail late with a
+     * {@link java.util.NoSuchElementException}, {@link java.util.EmptyStackException}, or
+     * {@link IllegalStateException}.
+     */
+    private void validateShopRandomization(Set<Item> possible, Set<Item> guaranteed, List<Shop> shops) {
+        int totalSlots = 0;
+        int mainGameSlots = 0;
+        int nonMainGameSlots = 0;
+        for (Shop shop : shops) {
+            if (!shop.isSpecialShop()) {
+                continue;
+            }
+            int slots = shop.getItems().size();
+            totalSlots += slots;
+            if (shop.isMainGame()) {
+                mainGameSlots += slots;
+            } else {
+                nonMainGameSlots += slots;
+            }
+        }
+
+        // All guaranteed items are placed in main-game shops, so they must fit there.
+        // (This also covers the case where guaranteed items exceed the total number of slots.)
+        if (guaranteed.size() > mainGameSlots) {
+            throw new RandomizationException("Cannot randomize shop items: there are more guaranteed items ("
+                    + guaranteed.size() + ") than main-game shop slots (" + mainGameSlots
+                    + "). Disable some guaranteed item options or use a game with more shop slots.");
+        }
+
+        // Non-main-game shops are filled exclusively with non-guaranteed items, and any remaining
+        // slots also need non-guaranteed items. If the filtered candidate pool is empty while slots
+        // still need filling, randomization cannot proceed.
+        int nonGuaranteedCandidates = 0;
+        for (Item item : possible) {
+            if (!guaranteed.contains(item)) {
+                nonGuaranteedCandidates++;
+            }
+        }
+        int nonGuaranteedSlotsNeeded = totalSlots - guaranteed.size();
+        if (nonGuaranteedSlotsNeeded > 0 && nonGuaranteedCandidates == 0) {
+            throw new RandomizationException("Cannot randomize shop items: no eligible items remain after filtering. "
+                    + "Relax the shop item filters (e.g. banned regular/overpowered items).");
+        }
     }
 
     private List<Item> setupNewItems(Set<Item> possible, Set<Item> guaranteed, List<Shop> shops) {

@@ -533,5 +533,7 @@ public class SpeciesMovesetRandomizer extends Randomizer {
             Move thisHM = moveData.get(hm);
             thisHM.pp = 0;
         }
+
+        changesMade = true;
     }
 }

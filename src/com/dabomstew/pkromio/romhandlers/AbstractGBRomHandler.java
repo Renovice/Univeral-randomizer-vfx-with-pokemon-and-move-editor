@@ -279,8 +279,8 @@ public abstract class AbstractGBRomHandler extends AbstractRomHandler {
 	}
 
 	protected void writeWord(byte[] data, int offset, int value) {
-		data[offset] = (byte) (value % 0x100);
-		data[offset + 1] = (byte) ((value / 0x100) % 0x100);
+		data[offset] = (byte) (value & 0xFF);
+		data[offset + 1] = (byte) ((value >> 8) & 0xFF);
 	}
 
 	protected boolean matches(byte[] data, int offset, byte[] needle) {
@@ -311,6 +311,10 @@ public abstract class AbstractGBRomHandler extends AbstractRomHandler {
         int length = 0;
         int terminatorCount = 0;
         do {
+            if (offset + length >= rom.length) {
+                throw new RomIOException("Reached end of ROM while looking for data terminator at offset 0x"
+                        + Integer.toHexString(offset) + ".");
+            }
             if (rom[offset + length] == terminator) terminatorCount++;
             length++;
         } while (terminatorCount < terminatorAmount);

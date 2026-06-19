@@ -28,8 +28,16 @@ import java.util.ResourceBundle;
 import javax.imageio.ImageIO;
 
 class TypeEffectivenessEditorDialog extends JDialog {
-    private static final Effectiveness[] ALLOWED_EFFECTIVENESSES = new Effectiveness[] {
+    // The full ordered set of values, ZERO (immunity) first. Whether ZERO is actually offered
+    // depends on the loaded ROM's capability (see allowZero / ALLOWED_EFFECTIVENESSES).
+    private static final Effectiveness[] EFFECTIVENESSES_WITH_ZERO = new Effectiveness[] {
             Effectiveness.ZERO, Effectiveness.HALF, Effectiveness.NEUTRAL, Effectiveness.DOUBLE };
+    private static final Effectiveness[] EFFECTIVENESSES_WITHOUT_ZERO = new Effectiveness[] {
+            Effectiveness.HALF, Effectiveness.NEUTRAL, Effectiveness.DOUBLE };
+
+    // Selectable values for this dialog instance: includes ZERO only when the ROM can persist
+    // newly-added immunities (RomHandler.hasTypeImmunityEditSupport()).
+    private final Effectiveness[] allowedEffectivenesses;
 
     private final ResourceBundle bundle;
     private final TypeTable originalTable;
@@ -51,8 +59,16 @@ class TypeEffectivenessEditorDialog extends JDialog {
     private TypeTable resultTable;
 
     TypeEffectivenessEditorDialog(java.awt.Window owner, ResourceBundle bundle, TypeTable sourceTable) {
+        // Default: allow ZERO (immunity). Callers that know the ROM cannot persist new immunities
+        // should use the 4-arg constructor with allowZero=false.
+        this(owner, bundle, sourceTable, true);
+    }
+
+    TypeEffectivenessEditorDialog(java.awt.Window owner, ResourceBundle bundle, TypeTable sourceTable,
+            boolean allowZero) {
         super(owner, bundle.getString("GUI.teManualEditorDialog.title"), ModalityType.APPLICATION_MODAL);
         this.bundle = bundle;
+        this.allowedEffectivenesses = allowZero ? EFFECTIVENESSES_WITH_ZERO : EFFECTIVENESSES_WITHOUT_ZERO;
         this.originalTable = new TypeTable(sourceTable);
         this.workingTable = new TypeTable(sourceTable);
         this.types = workingTable.getTypes();
@@ -103,7 +119,7 @@ class TypeEffectivenessEditorDialog extends JDialog {
             public String getToolTipText(java.awt.event.MouseEvent event) {
                 int row = rowAtPoint(event.getPoint());
                 int column = columnAtPoint(event.getPoint());
-                if (row >= 0 && column > 0) {
+                if (row >= 0 && column >= 0) {
                     Object value = getValueAt(row, column);
                     if (value instanceof Effectiveness) {
                         return effectDescription((Effectiveness) value);
@@ -123,16 +139,36 @@ class TypeEffectivenessEditorDialog extends JDialog {
         effectivenessTable.setDefaultRenderer(Effectiveness.class, new EffectivenessCellRenderer());
         effectivenessTable.getTableHeader().setReorderingAllowed(false);
 
-        JComboBox<Effectiveness> effectivenessCombo = new JComboBox<>(ALLOWED_EFFECTIVENESSES);
+        JComboBox<Effectiveness> effectivenessCombo = new JComboBox<>(allowedEffectivenesses);
         effectivenessCombo.setRenderer(new EffectivenessComboRenderer());
         effectivenessTable.setDefaultEditor(Effectiveness.class, new DefaultCellEditor(effectivenessCombo));
 
-        TableColumn defenderColumn = effectivenessTable.getColumnModel().getColumn(0);
+        // The defending-type column lives in a separate frozen table placed in
+        // the scroll pane's row header, so it stays put when scrolling
+        // horizontally (mirroring how the attacking-type header row stays put
+        // when scrolling vertically).
+        final JTable defenderTable = new JTable(tableModel);
+        defenderTable.setRowHeight(60);
+        defenderTable.setShowGrid(true);
+        defenderTable.setGridColor(Color.BLACK);
+        defenderTable.setIntercellSpacing(new Dimension(1, 1));
+        defenderTable.setRowSelectionAllowed(false);
+        defenderTable.setCellSelectionEnabled(false);
+        defenderTable.setFocusable(false);
+        defenderTable.getTableHeader().setReorderingAllowed(false);
+        while (defenderTable.getColumnCount() > 1) {
+            defenderTable.removeColumn(defenderTable.getColumnModel().getColumn(1));
+        }
+        TableColumn defenderColumn = defenderTable.getColumnModel().getColumn(0);
         defenderColumn.setPreferredWidth(140);
         defenderColumn.setMinWidth(140);
         defenderColumn.setCellRenderer(new TypeNameCellRenderer(false));
         defenderColumn.setHeaderRenderer(new CornerHeaderRenderer());
-        for (int i = 1; i < effectivenessTable.getColumnCount(); i++) {
+        defenderTable.setPreferredScrollableViewportSize(new Dimension(141, 0));
+
+        // Main table shows only the effectiveness columns.
+        effectivenessTable.removeColumn(effectivenessTable.getColumnModel().getColumn(0));
+        for (int i = 0; i < effectivenessTable.getColumnCount(); i++) {
             TableColumn column = effectivenessTable.getColumnModel().getColumn(i);
             column.setPreferredWidth(110);
             column.setMinWidth(110);
@@ -141,10 +177,13 @@ class TypeEffectivenessEditorDialog extends JDialog {
 
         // Create a scroll pane with the table - header will be fixed automatically
         JScrollPane scrollPane = new JScrollPane(effectivenessTable);
+        scrollPane.setRowHeaderView(defenderTable);
+        scrollPane.setCorner(JScrollPane.UPPER_LEFT_CORNER, defenderTable.getTableHeader());
 
         // Ensure header height matches row height for proper alignment
         effectivenessTable.getTableHeader().setPreferredSize(
                 new Dimension(effectivenessTable.getTableHeader().getPreferredSize().width, 60));
+        defenderTable.getTableHeader().setPreferredSize(new Dimension(141, 60));
 
         // Increase scroll speed for mouse wheel
         scrollPane.getVerticalScrollBar().setUnitIncrement(20);
@@ -195,12 +234,11 @@ class TypeEffectivenessEditorDialog extends JDialog {
         });
         getRootPane().setDefaultButton(applyButton);
 
-        effectivenessTable.addMouseListener(new java.awt.event.MouseAdapter() {
+        defenderTable.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent event) {
-                int row = effectivenessTable.rowAtPoint(event.getPoint());
-                int column = effectivenessTable.columnAtPoint(event.getPoint());
-                if (row >= 0 && column == 0) {
+                int row = defenderTable.rowAtPoint(event.getPoint());
+                if (row >= 0) {
                     showTypeDetails(types.get(row));
                 }
             }
@@ -210,8 +248,13 @@ class TypeEffectivenessEditorDialog extends JDialog {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent event) {
                 int column = effectivenessTable.columnAtPoint(event.getPoint());
-                if (column > 0) {
-                    showTypeDetails(types.get(column - 1));
+                if (column >= 0) {
+                    // View column 0 is model column 1 (the defender column moved
+                    // to the frozen row header), so convert before indexing.
+                    int modelColumn = effectivenessTable.convertColumnIndexToModel(column);
+                    if (modelColumn >= 1) {
+                        showTypeDetails(types.get(modelColumn - 1));
+                    }
                 }
             }
         });
@@ -402,7 +445,7 @@ class TypeEffectivenessEditorDialog extends JDialog {
         Effectiveness current = attack ? workingTable.getEffectiveness(focusType, otherType)
                 : workingTable.getEffectiveness(otherType, focusType);
 
-        JComboBox<Effectiveness> combo = new JComboBox<>(ALLOWED_EFFECTIVENESSES);
+        JComboBox<Effectiveness> combo = new JComboBox<>(allowedEffectivenesses);
         combo.setRenderer(new EffectivenessComboRenderer());
         combo.setSelectedItem(current);
 

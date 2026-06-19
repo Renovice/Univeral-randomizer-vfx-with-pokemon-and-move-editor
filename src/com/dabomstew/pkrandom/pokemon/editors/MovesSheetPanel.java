@@ -41,7 +41,7 @@ public class MovesSheetPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         // Create toolbar
         add(createStyledToolbar(), BorderLayout.NORTH);
@@ -53,9 +53,9 @@ public class MovesSheetPanel extends JPanel {
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
@@ -87,7 +87,7 @@ public class MovesSheetPanel extends JPanel {
 
         JLabel infoLabel = new JLabel("Edit move data directly in the table");
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -95,7 +95,7 @@ public class MovesSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new MovesDataTableModel(movesList, romHandler);
 
@@ -186,6 +186,19 @@ public class MovesSheetPanel extends JPanel {
         TableLayoutDefaults.applyRowHeight(frozenTable, false);
         TableLayoutDefaults.applyRowHeight(mainTable, false);
 
+        // The JTables listen to the frozen/main wrapper models, but a cell edit fires its
+        // change event on the inner tableModel (and some setters update OTHER derived columns
+        // in the same row). Bridge those events to a repaint of both visible tables so derived
+        // columns refresh immediately instead of showing stale values (Feature #35).
+        tableModel.addTableModelListener(e -> {
+            if (frozenTable != null) {
+                frozenTable.repaint();
+            }
+            if (mainTable != null) {
+                mainTable.repaint();
+            }
+        });
+
         // Sync row selection between frozen and main tables
         frozenTable.setSelectionModel(mainTable.getSelectionModel());
         frozenTable.getColumnModel().getSelectionModel().setSelectionMode(ListSelectionModel.SINGLE_INTERVAL_SELECTION);
@@ -195,15 +208,15 @@ public class MovesSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
 
@@ -375,10 +388,12 @@ public class MovesSheetPanel extends JPanel {
     public void save() {
         stopEditing();
         ManualEditRegistry.getInstance().addEntries("Moves Data", collectMoveChangesForLog());
-        JOptionPane.showMessageDialog(this,
-                "Moves updated successfully!",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "Moves updated successfully!",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
         commitChanges();
     }
 
@@ -474,12 +489,12 @@ public class MovesSheetPanel extends JPanel {
                     c.setForeground(Color.WHITE);
                 } catch (Exception e) {
                     c.setBackground(
-                            row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR);
-                    c.setForeground(Color.BLACK);
+                            row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor());
+                    c.setForeground(EditorTheme.text());
                 }
             } else if (!isSelected) {
-                c.setBackground(row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR);
-                c.setForeground(Color.BLACK);
+                c.setBackground(row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor());
+                c.setForeground(EditorTheme.text());
             }
             setBorder(noFocusBorder);
             return c;
@@ -524,7 +539,7 @@ public class MovesSheetPanel extends JPanel {
                 case FAIRY:
                     return new Color(238, 153, 238);
                 default:
-                    return Color.WHITE;
+                    return EditorTheme.surface();
             }
         }
     }
@@ -559,8 +574,8 @@ public class MovesSheetPanel extends JPanel {
                 setBackground(table.getSelectionBackground());
                 setForeground(table.getSelectionForeground());
             } else {
-                setBackground(row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR);
-                setForeground(Color.BLACK);
+                setBackground(row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor());
+                setForeground(EditorTheme.text());
             }
 
             // Remove focus border to prevent flickering
@@ -583,7 +598,7 @@ public class MovesSheetPanel extends JPanel {
             checkBox.setOpaque(true);
             checkBox.setBorderPainted(false);
             checkBox.setFocusPainted(false);
-            checkBox.setBackground(Color.WHITE);
+            checkBox.setBackground(EditorTheme.surface());
 
             // Toggle on click - this prevents the "jumping" behavior
             checkBox.addActionListener(e -> {
@@ -612,8 +627,8 @@ public class MovesSheetPanel extends JPanel {
                 checkBox.setForeground(table.getSelectionForeground());
             } else {
                 checkBox.setBackground(
-                        row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR);
-                checkBox.setForeground(Color.BLACK);
+                        row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor());
+                checkBox.setForeground(EditorTheme.text());
             }
 
             return checkBox;
@@ -782,7 +797,8 @@ public class MovesSheetPanel extends JPanel {
 
         @Override
         public int getRowCount() {
-            return movesList.size();
+            // movesList is 1-based (index 0 is a null placeholder), so skip it
+            return Math.max(0, movesList.size() - 1);
         }
 
         @Override
@@ -816,11 +832,11 @@ public class MovesSheetPanel extends JPanel {
 
         @Override
         public Object getValueAt(int row, int col) {
-            if (row >= movesList.size()) {
+            if (row + 1 >= movesList.size()) {
                 return defaultValueForColumn(col);
             }
 
-            Move move = movesList.get(row);
+            Move move = movesList.get(row + 1);
             if (move == null) {
                 return defaultValueForColumn(col);
             }
@@ -906,10 +922,10 @@ public class MovesSheetPanel extends JPanel {
 
         @Override
         public void setValueAt(Object val, int row, int col) {
-            if (row >= movesList.size()) {
+            if (row + 1 >= movesList.size()) {
                 return;
             }
-            Move move = movesList.get(row);
+            Move move = movesList.get(row + 1);
             if (move == null) {
                 return;
             }
@@ -918,7 +934,7 @@ public class MovesSheetPanel extends JPanel {
                 if (col == colName) {
                     move.name = val.toString();
                 } else if (col == colEffect) {
-                    move.effectIndex = parseInt(val);
+                    move.effectIndex = parseBoundedInt(val, 0, 255);
                 } else if (col == colCategory) {
                     move.category = parseCategoryName(val.toString());
                 } else if (col == colPower) {
@@ -932,11 +948,14 @@ public class MovesSheetPanel extends JPanel {
                 } else if (col == colPp) {
                     move.pp = parseBoundedInt(val, 0, 255);
                 } else if (col == colEffectChance) {
-                    move.secondaryEffectChance = parseInt(val);
+                    move.secondaryEffectChance = parseBoundedInt(val, 0, 100);
                 } else if (col == colTarget) {
                     move.target = parseTargetName(val.toString());
                 } else if (col == colPriority) {
-                    move.priority = (byte) parseInt(val);
+                    // Clamp to the real move-priority range instead of casting to byte:
+                    // a bare (byte) cast wraps an entry like 200 into -56, which is then
+                    // shown straight back to the user. -7..6 spans every game's priorities.
+                    move.priority = parseBoundedInt(val, -7, 6);
                 } else if (col == colMakesContact) {
                     move.makesContact = parseBoolean(val);
                 } else if (col == colBlockedByProtect) {

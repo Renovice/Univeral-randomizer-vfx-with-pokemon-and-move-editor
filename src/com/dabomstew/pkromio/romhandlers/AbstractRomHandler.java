@@ -491,6 +491,16 @@ public abstract class AbstractRomHandler implements RomHandler {
     }
 
     @Override
+    public boolean hasTypeImmunityEditSupport() {
+        // By default, immunities (Effectiveness.ZERO) round-trip exactly when the type table can be
+        // read/written at all. Every concrete handler that overrides the type table read/write
+        // (Gen1-6) persists ZERO entries, so mirroring hasTypeEffectivenessSupport() is correct.
+        // A future handler that supports the editor but cannot store new immunities can override
+        // this to return false to keep the "Immune (0x)" option hidden.
+        return hasTypeEffectivenessSupport();
+    }
+
+    @Override
     public TypeTable getTypeTable() {
         // just returns some hard-coded tables if the subclass doesn't implement actually reading from ROM
         // obviously it is better if the type table can be actually read from ROM, so override this when possible
@@ -782,8 +792,11 @@ public abstract class AbstractRomHandler implements RomHandler {
             prepareSaveRom();
             return saveAsDirectory ? saveRomDirectory(filename) : saveRomFile(filename, seed);
         } catch (RomIOException e) {
+            // Do NOT swallow real write failures (ROM full, NARC/GARC/overlay growth, IO errors).
+            // Swallowing them made failed saves look successful and left corrupt output ROMs.
+            // Log, then re-throw so callers (e.g. GameRandomizer) capture the failure and report it.
             e.printStackTrace();
-            return false;
+            throw e;
         }
     }
 

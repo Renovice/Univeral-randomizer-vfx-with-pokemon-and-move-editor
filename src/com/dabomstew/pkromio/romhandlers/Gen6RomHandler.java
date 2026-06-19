@@ -484,7 +484,9 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
             byte[] newRawFile = N3DSTxtHandler.saveEntry(oldRawFile, strings, romEntry.getRomType());
             textGARC.setFile(index, newRawFile);
         } catch (IOException e) {
-            e.printStackTrace();
+            // Surface the failure instead of silently keeping the old text, which would
+            // otherwise let randomization report success with inconsistent ROM text.
+            throw new RomIOException("Failed to repack text GARC entry " + index, e);
         }
     }
 
@@ -956,8 +958,17 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
             data[14] = determineCriticalStageByte(move);
             data[15] = (byte) clamp((int) Math.round(move.flinchPercentChance), 0, 255);
             writeWord(data, 16, clamp(move.effectIndex, 0, 0xFFFF));
-            data[18] = (byte) clampSigned(move.recoilPercent, -128, 127);
-            data[19] = (byte) clamp(move.absorbPercent, 0, 255);
+            // Recoil/absorb share byte 18, distinguished by categoryQuality. Mirror the load
+            // (absorb reads +byte18; recoil reads -byte18). The previous code sign-flipped
+            // recoil on every save and wrote absorb to the wrong byte (19, clobbering it).
+            if (move.categoryQuality == Gen6Constants.damageAbsorbQuality) {
+                data[18] = (byte) clamp(move.absorbPercent, 0, 255);
+            } else {
+                data[18] = (byte) clampSigned(-move.recoilPercent, -128, 127);
+                // Byte 19 holds absorbPercent for non-absorb moves (load reads it at moveData[19]).
+                // Mirror the Gen7 fix so a Heal-column edit round-trips instead of being dropped.
+                data[19] = (byte) clamp(move.absorbPercent, 0, 255);
+            }
             data[20] = (byte) clamp(move.target, 0, 255);
 
             for (int statChange = 0; statChange < 3; statChange++) {
@@ -3253,6 +3264,18 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
         }
     }
 
+    // Wrapper around find() that throws if the pattern is missing, non-unique, or
+    // malformed, so callers that derive write offsets from the result can't write to
+    // a bogus offset (e.g. -1 + prefix length) or corrupt an unrelated part of a file.
+    private int findOrThrow(byte[] data, String hexString, String patternName) {
+        int offset = find(data, hexString);
+        if (offset < 0) {
+            throw new RomIOException("Could not find a unique match for pattern '" + patternName
+                    + "' (find returned " + offset + ")");
+        }
+        return offset;
+    }
+
     @Override
     public int getTMCount() {
         return Gen6Constants.tmCount;
@@ -3749,7 +3772,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
 
         // Find the value for the Pokemon's cry
 
-        int baseAddr = find(code, Gen6Constants.criesTablePrefixXY);
+        int baseAddr = findOrThrow(code, Gen6Constants.criesTablePrefixXY, "criesTablePrefixXY");
         baseAddr += Gen6Constants.criesTablePrefixXY.length() / 2;
 
         if (introPokemonForme != 0) {
@@ -3766,7 +3789,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
 
             // Replace the Pokemon model that's loaded, and set its forme
 
-            int croModelOffset = find(introCRO, Gen6Constants.introPokemonModelOffsetXY);
+            int croModelOffset = findOrThrow(introCRO, Gen6Constants.introPokemonModelOffsetXY, "introPokemonModelOffsetXY");
             croModelOffset += Gen6Constants.introPokemonModelOffsetXY.length() / 2;
 
             writeWord(introCRO, croModelOffset, introPokemonNum);
@@ -3775,12 +3798,12 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
             // Replace the initial cry when the Pokemon exits the ball
             // First, re-point two branches
 
-            int croInitialCryOffset1 = find(introCRO, Gen6Constants.introInitialCryOffset1XY);
+            int croInitialCryOffset1 = findOrThrow(introCRO, Gen6Constants.introInitialCryOffset1XY, "introInitialCryOffset1XY");
             croInitialCryOffset1 += Gen6Constants.introInitialCryOffset1XY.length() / 2;
 
             introCRO[croInitialCryOffset1] = 0x5E;
 
-            int croInitialCryOffset2 = find(introCRO, Gen6Constants.introInitialCryOffset2XY);
+            int croInitialCryOffset2 = findOrThrow(introCRO, Gen6Constants.introInitialCryOffset2XY, "introInitialCryOffset2XY");
             croInitialCryOffset2 += Gen6Constants.introInitialCryOffset2XY.length() / 2;
 
             introCRO[croInitialCryOffset2] = 0x2F;
@@ -3791,7 +3814,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
             // + emotion (same function
             // that is used for the repeated cries)
 
-            int croInitialCryOffset3 = find(introCRO, Gen6Constants.introInitialCryOffset3XY);
+            int croInitialCryOffset3 = findOrThrow(introCRO, Gen6Constants.introInitialCryOffset3XY, "introInitialCryOffset3XY");
             croInitialCryOffset3 += Gen6Constants.introInitialCryOffset3XY.length() / 2;
 
             writeLong(introCRO, croInitialCryOffset3, 0xE1A02000); // cpy r2,r0
@@ -3810,7 +3833,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
 
             // Replace the repeated cry that the Pokemon does while standing around
             // Just replace a pool value
-            int croRepeatedCryOffset = find(introCRO, Gen6Constants.introRepeatedCryOffsetXY);
+            int croRepeatedCryOffset = findOrThrow(introCRO, Gen6Constants.introRepeatedCryOffsetXY, "introRepeatedCryOffsetXY");
             croRepeatedCryOffset += Gen6Constants.introRepeatedCryOffsetXY.length() / 2;
             writeLong(introCRO, croRepeatedCryOffset, repeatedCry);
 

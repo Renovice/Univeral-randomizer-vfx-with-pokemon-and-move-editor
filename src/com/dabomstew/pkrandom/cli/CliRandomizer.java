@@ -88,8 +88,20 @@ public class CliRandomizer {
                 String filename = fh.getAbsolutePath();
 
                 GameRandomizer randomizer = new GameRandomizer(settings, null, romHandler, bundle, saveAsDirectory);
-                randomizer.randomize(filename, verboseLog);
+                GameRandomizer.Results randoResults = randomizer.randomize(filename, verboseLog);
                 verboseLog.close();
+
+                // If randomization or saving failed, report it and do NOT write a log or claim success.
+                if (!randoResults.wasSaveSuccessful()) {
+                    Exception e = randoResults.getException();
+                    printError("Randomization failed; the ROM was not saved correctly.");
+                    if (e != null) {
+                        e.printStackTrace();
+                    }
+                    return false;
+                }
+
+                // The save succeeded. Only now is it meaningful to write the log.
                 byte[] out = baos.toByteArray();
                 if (saveLog) {
                     try {
@@ -101,6 +113,15 @@ public class CliRandomizer {
                         fos.close();
                     } catch (IOException e) {
                         printWarning("Could not write log.");
+                    }
+                }
+                if (!randoResults.wasLogSuccessful()) {
+                    // The ROM was saved fine, but generating the in-memory log threw. Surface it as a
+                    // warning rather than failing the whole run, since the output ROM is valid.
+                    printWarning("Randomization succeeded, but generating the log failed.");
+                    Exception logE = randoResults.getLogException();
+                    if (logE != null) {
+                        logE.printStackTrace();
                     }
                 }
                 System.out.println("Randomized successfully!");

@@ -22,6 +22,7 @@ package com.dabomstew.pkromio.ctr;
 /*----------------------------------------------------------------------------*/
 
 import com.dabomstew.pkromio.FileFunctions;
+import com.dabomstew.pkromio.exceptions.RomIOException;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -84,6 +85,20 @@ public class Mini {
         }
 
         int count = FileFunctions.read2ByteInt(fileData, 2);
+        // The offset table holds (count + 1) 4-byte entries starting at byte 4, so the
+        // file must be large enough to contain it. Validate before reading anything,
+        // and validate every offset before slicing, so a malformed/corrupt archive
+        // raises a clear error instead of an ArrayIndexOutOfBoundsException or a
+        // NegativeArraySizeException deep inside arraycopy.
+        if (count < 0) {
+            throw new RomIOException("Invalid Mini archive '" + identifier + "': negative count " + count);
+        }
+        long tableEnd = 4L + ((long) (count + 1) * 4);
+        if (tableEnd > fileData.length) {
+            throw new RomIOException("Invalid Mini archive '" + identifier
+                    + "': offset table (" + tableEnd + " bytes) exceeds data length " + fileData.length);
+        }
+
         int ctr = 4;
         int start = FileFunctions.readFullInt(fileData, ctr);
         ctr += 4;
@@ -92,6 +107,10 @@ public class Mini {
             int end = FileFunctions.readFullInt(fileData, ctr);
             ctr += 4;
             int len = end - start;
+            if (len < 0 || start < 0 || (long) start + len > fileData.length) {
+                throw new RomIOException("Invalid Mini archive '" + identifier + "': subfile " + i
+                        + " range [" + start + ", " + end + ") is out of bounds for data length " + fileData.length);
+            }
             byte[] data = new byte[len];
             System.arraycopy(fileData, start, data, 0, len);
             returnData[i] = data;

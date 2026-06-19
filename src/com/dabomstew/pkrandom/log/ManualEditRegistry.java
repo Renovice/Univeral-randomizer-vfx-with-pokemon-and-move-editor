@@ -30,7 +30,13 @@ public final class ManualEditRegistry {
         if (section == null || section.isEmpty() || entry == null || entry.isEmpty()) {
             return;
         }
-        sections.computeIfAbsent(section, key -> new ArrayList<>()).add(entry);
+        List<String> bucket = sections.computeIfAbsent(section, key -> new ArrayList<>());
+        // De-duplicate: an edit line is unique per section (it names the entity + field), so
+        // an identical line only ever arises from re-emitting the same edit (e.g. clicking
+        // "Save" twice, or Save All after an individual Save). Collapsing keeps the log clean.
+        if (!bucket.contains(entry)) {
+            bucket.add(entry);
+        }
     }
 
     public synchronized void addEntries(String section, List<String> entries) {
@@ -43,7 +49,8 @@ public final class ManualEditRegistry {
                 continue;
             }
             String trimmed = entry.trim();
-            if (!trimmed.isEmpty()) {
+            // See addEntry: skip lines already recorded so repeated saves don't duplicate them.
+            if (!trimmed.isEmpty() && !bucket.contains(trimmed)) {
                 bucket.add(trimmed);
             }
         }

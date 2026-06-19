@@ -39,32 +39,65 @@ public class Gen6TMsSheetPanel extends JPanel {
     private final EditorUtils.FindState findState = new EditorUtils.FindState();
     private final PokemonIconCache iconCache;
     private final Map<Species, boolean[]> compatibilityBackup = new HashMap<>();
+    private JPanel tableContainer;
+    // Feature #7: snapshot/revert for the "Edit TM Moves..." dialog, which applies immediately.
+    private final EditorUtils.MoveListGuard tmMovesGuard;
 
     public Gen6TMsSheetPanel(RomHandler romHandler) {
         this.romHandler = romHandler;
         this.pokemonList = romHandler.getSpeciesInclFormes();
         this.moveList = romHandler.getMoves();
-        this.tmCompatibility = romHandler.getTMHMCompatibility();
+        this.tmCompatibility = EditorDataCache.get(romHandler).getTMHMCompatibility();
         this.tmCount = romHandler.getTMCount();
         this.hmCount = romHandler.getHMCount();
         this.iconCache = PokemonIconCache.get(romHandler);
+        this.tmMovesGuard = new EditorUtils.MoveListGuard(romHandler::getTMMoves, romHandler::setTMMoves);
         initializeUI();
         createBackup();
     }
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createToolbar(), BorderLayout.NORTH);
-        add(createFrozenColumnTable(), BorderLayout.CENTER);
+        tableContainer = createFrozenColumnTable();
+        add(tableContainer, BorderLayout.CENTER);
+    }
+
+    /**
+     * Opens the TM move assignment dialog and, when changes are applied, rebuilds
+     * the compatibility table so the column headers show the new move names.
+     */
+    private void editTmMoves() {
+        stopEditing();
+        boolean changed = EditorUtils.editTMMoves(this, romHandler);
+        if (changed) {
+            tmMovesGuard.markDirty();
+            rebuildTable();
+        }
+    }
+
+    /**
+     * Rebuilds the table area in place (the compatibility edits live in
+     * {@code tmCompatibility} and survive the rebuild) so the freshly-built column
+     * headers reflect the current TM move assignment.
+     */
+    private void rebuildTable() {
+        if (tableContainer != null) {
+            remove(tableContainer);
+        }
+        tableContainer = createFrozenColumnTable();
+        add(tableContainer, BorderLayout.CENTER);
+        revalidate();
+        repaint();
     }
 
     private JPanel createToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
@@ -101,11 +134,19 @@ public class Gen6TMsSheetPanel extends JPanel {
         toolbar.add(Box.createHorizontalStrut(10));
         toolbar.add(selectAllButton);
         toolbar.add(clearAllButton);
+
+        // Only offer TM move reassignment when this ROM exposes editable TM moves.
+        if (!romHandler.getTMMoves().isEmpty()) {
+            JButton editTmMovesButton = EditorUtils.createStyledButton("Edit TM Moves...", new Color(123, 31, 162));
+            editTmMovesButton.addActionListener(e -> editTmMoves());
+            toolbar.add(Box.createHorizontalStrut(10));
+            toolbar.add(editTmMovesButton);
+        }
         toolbar.add(Box.createHorizontalStrut(10));
 
         JLabel infoLabel = new JLabel(String.format("TM/HM Compatibility Matrix - %d TMs, %d HMs", tmCount, hmCount));
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -113,7 +154,7 @@ public class Gen6TMsSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new TMCompatibilityTableModel(pokemonList, moveList, tmCompatibility, tmCount, hmCount,
                 romHandler);
@@ -308,15 +349,15 @@ public class Gen6TMsSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
 
@@ -387,6 +428,8 @@ public class Gen6TMsSheetPanel extends JPanel {
 
     public void onWindowClosing() {
         stopEditing();
+        // Feature #7: drop an unsaved TM-move reassignment (the dialog applied it live).
+        tmMovesGuard.revertIfDirty();
         restoreFromBackup();
     }
 
@@ -420,10 +463,14 @@ public class Gen6TMsSheetPanel extends JPanel {
         ManualEditRegistry.getInstance().addEntries("TM/HM Compatibility", collectTmChangesForLog());
         romHandler.setTMHMCompatibility(tmCompatibility);
 
-        JOptionPane.showMessageDialog(this,
-                "- TM/HM compatibility updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- TM/HM compatibility updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+        // Feature #7: TM-move reassignment is now kept; re-baseline its revert snapshot.
+        tmMovesGuard.commit();
         commitChanges();
     }
 
@@ -450,13 +497,14 @@ public class Gen6TMsSheetPanel extends JPanel {
             List<String> additions = new ArrayList<>();
             List<String> removals = new ArrayList<>();
 
-            for (int i = 0; i < totalColumns; i++) {
+            // Compatibility arrays are 1-indexed (index 0 unused), so diff 1..totalColumns
+            for (int i = 1; i <= totalColumns; i++) {
                 boolean beforeVal = before != null && i < before.length && before[i];
                 boolean afterVal = after != null && i < after.length && after[i];
                 if (beforeVal == afterVal) {
                     continue;
                 }
-                String label = formatLabel(i, tmMoves, hmMoves);
+                String label = formatLabel(i - 1, tmMoves, hmMoves);
                 if (afterVal) {
                     additions.add(label);
                 } else {
@@ -514,7 +562,12 @@ public class Gen6TMsSheetPanel extends JPanel {
 
         if (result == JOptionPane.YES_OPTION) {
             stopEditing();
+            // Feature #7: revert an unsaved TM-move reassignment, then rebuild headers if it changed.
+            boolean reverted = tmMovesGuard.revertIfDirty();
             restoreFromBackup();
+            if (reverted) {
+                rebuildTable();
+            }
         }
     }
 
@@ -647,13 +700,13 @@ public class Gen6TMsSheetPanel extends JPanel {
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
             setSelected(value != null && (Boolean) value);
-            Color baseColor = row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR;
+            Color baseColor = row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor();
             if (isSelected) {
                 setBackground(table.getSelectionBackground());
                 setForeground(table.getSelectionForeground());
             } else {
                 setBackground(baseColor);
-                setForeground(Color.BLACK);
+                setForeground(EditorTheme.text());
             }
             return this;
         }
@@ -679,13 +732,13 @@ public class Gen6TMsSheetPanel extends JPanel {
             } else {
                 checkBox.setSelected(false);
             }
-            Color baseColor = row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR;
+            Color baseColor = row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor();
             if (isSelected) {
                 checkBox.setBackground(table.getSelectionBackground());
                 checkBox.setForeground(table.getSelectionForeground());
             } else {
                 checkBox.setBackground(baseColor);
-                checkBox.setForeground(Color.BLACK);
+                checkBox.setForeground(EditorTheme.text());
             }
             return checkBox;
         }

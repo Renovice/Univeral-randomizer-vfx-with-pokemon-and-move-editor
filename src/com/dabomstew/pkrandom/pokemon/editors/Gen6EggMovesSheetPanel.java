@@ -30,7 +30,9 @@ import java.util.stream.Collectors;
 public class Gen6EggMovesSheetPanel extends JPanel {
 
     // pk3DS caps its Gen6/7 egg-move UI at 30 entries; mirror that ceiling so the
-    // sheet behaves the same while still rendering any pre-existing excess slots.
+    // sheet behaves the same. The column model is fixed at this width, so any
+    // pre-existing slots beyond MAX_EGG_MOVES are hidden and uneditable in the
+    // sheet, but they are NOT discarded: save() preserves the full list untouched.
     private static final int MAX_EGG_MOVES = 30;
 
     private final RomHandler romHandler;
@@ -40,6 +42,12 @@ public class Gen6EggMovesSheetPanel extends JPanel {
     private final Map<Integer, List<Integer>> eggMovesBackup = new HashMap<>();
     private final Map<String, Integer> moveLookup = new HashMap<>();
     private final PokemonIconCache iconCache;
+    // Whether the current ROM handler actually persists per-forme egg moves
+    // (Gen 7), versus base-species-only (Gen 6). When false, alternate-forme rows
+    // are shown but read-only so edits are not silently dropped at save. The Gen 7
+    // panel reuses this class with a handler that returns true here, so the same
+    // rows become editable there.
+    private final boolean formeEggMovesSupported;
 
     private JTable frozenTable;
     private JTable mainTable;
@@ -51,8 +59,9 @@ public class Gen6EggMovesSheetPanel extends JPanel {
         this.romHandler = romHandler;
         this.pokemonList = romHandler.getSpeciesInclFormes();
         this.moveList = romHandler.getMoves();
-        this.eggMoves = copyEggMoves(romHandler.getEggMoves());
+        this.eggMoves = EditorDataCache.get(romHandler).getEggMoves();
         this.iconCache = PokemonIconCache.get(romHandler);
+        this.formeEggMovesSupported = romHandler.supportsFormeEggMoves();
         buildMoveLookup();
         createBackup();
         initializeUI();
@@ -60,7 +69,7 @@ public class Gen6EggMovesSheetPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createStyledToolbar(), BorderLayout.NORTH);
         add(createFrozenColumnTable(), BorderLayout.CENTER);
@@ -68,9 +77,9 @@ public class Gen6EggMovesSheetPanel extends JPanel {
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
         saveButton.addActionListener(e -> save());
@@ -110,7 +119,7 @@ public class Gen6EggMovesSheetPanel extends JPanel {
 
         JLabel infoLabel = new JLabel("Egg Moves (XY/ORAS) - Edit inherited move list per species");
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -118,7 +127,7 @@ public class Gen6EggMovesSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new EggMovesTableModel();
         final boolean hasIcons = iconCache.hasIcons();
@@ -340,16 +349,16 @@ public class Gen6EggMovesSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
         EditorUtils.linkVerticalScrollBars(frozenScrollPane, mainScrollPane);
 
@@ -382,10 +391,12 @@ public class Gen6EggMovesSheetPanel extends JPanel {
             ManualEditRegistry.getInstance().addEntries("Egg Moves (Gen 6)", changes);
         }
         romHandler.setEggMoves(createNormalizedCopy(eggMoves));
-        JOptionPane.showMessageDialog(this,
-                "- Egg moves updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Egg moves updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
         commitChanges();
     }
 
@@ -444,6 +455,15 @@ public class Gen6EggMovesSheetPanel extends JPanel {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+        if (isReadOnlyFormeRow(row)) {
+            // Gen6 egg moves can only be saved for base species; refuse forme edits
+            // rather than silently dropping them at save.
+            JOptionPane.showMessageDialog(this,
+                    "Egg moves cannot be edited for alternate formes in this game.\nEdit the base species instead.",
+                    "Read-Only Row",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
 
         Species species = pokemonList.get(row + 1);
         List<Integer> moves = eggMoves.computeIfAbsent(species.getNumber(), id -> new ArrayList<>());
@@ -471,6 +491,15 @@ public class Gen6EggMovesSheetPanel extends JPanel {
             JOptionPane.showMessageDialog(this,
                     "Select a Pokemon first.",
                     "No Selection",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (isReadOnlyFormeRow(row)) {
+            // Gen6 egg moves can only be saved for base species; refuse forme edits
+            // rather than silently dropping them at save.
+            JOptionPane.showMessageDialog(this,
+                    "Egg moves cannot be edited for alternate formes in this game.\nEdit the base species instead.",
+                    "Read-Only Row",
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
@@ -574,11 +603,13 @@ public class Gen6EggMovesSheetPanel extends JPanel {
     }
 
     private List<Integer> trimTrailingBlanks(List<Integer> moves) {
-        List<Integer> copy = new ArrayList<>(moves);
-        int lastReal = copy.size() - 1;
-        while (lastReal >= 0 && (copy.get(lastReal) == null || copy.get(lastReal) < 0)) {
-            copy.remove(lastReal);
-            lastReal--;
+        // Drop ALL null/negative entries (not just trailing ones) so a cleared
+        // interior slot is never saved as -1 / written as 0xFFFF.
+        List<Integer> copy = new ArrayList<>();
+        for (Integer m : moves) {
+            if (m != null && m >= 0) {
+                copy.add(m);
+            }
         }
         return copy;
     }
@@ -638,6 +669,21 @@ public class Gen6EggMovesSheetPanel extends JPanel {
             return null;
         }
         return pokemonList.get(rowIndex + 1);
+    }
+
+    /**
+     * Returns true if the given table row is an alternate forme whose egg moves
+     * this game does NOT persist. Gen 6 stores egg moves per base species only, so
+     * such forme rows must stay read-only to avoid silently discarding edits at
+     * save. When the handler does round-trip per-forme egg moves (Gen 7), this
+     * always returns false so forme rows are fully editable.
+     */
+    private boolean isReadOnlyFormeRow(int rowIndex) {
+        if (formeEggMovesSupported) {
+            return false;
+        }
+        Species species = speciesForRow(rowIndex);
+        return species != null && !species.isBaseForme();
     }
 
     private Integer resolveMoveId(Object value) {
@@ -722,7 +768,10 @@ public class Gen6EggMovesSheetPanel extends JPanel {
 
         @Override
         public boolean isCellEditable(int rowIndex, int columnIndex) {
-            return columnIndex > 1 && !copyPasteModeEnabled;
+            // Gen 6 setEggMoves only persists base-species entries, so edits made on
+            // an alternate-forme row would be silently discarded at save. Keep such
+            // rows read-only unless the handler round-trips forme egg moves (Gen 7).
+            return columnIndex > 1 && !copyPasteModeEnabled && !isReadOnlyFormeRow(rowIndex);
         }
 
         @Override

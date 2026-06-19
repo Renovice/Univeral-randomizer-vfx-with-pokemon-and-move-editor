@@ -137,6 +137,7 @@ public class TMHMTutorCompatibilityRandomizer extends Randomizer {
             }
         }
         romHandler.setTMHMCompatibility(compat);
+        tmhmChangesMade = true;
     }
 
     /**

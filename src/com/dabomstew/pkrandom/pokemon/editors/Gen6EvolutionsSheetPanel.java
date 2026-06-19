@@ -57,7 +57,7 @@ public class Gen6EvolutionsSheetPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createStyledToolbar(), BorderLayout.NORTH);
         JPanel tablePanel = createFrozenColumnTable();
@@ -66,9 +66,9 @@ public class Gen6EvolutionsSheetPanel extends JPanel {
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
@@ -100,7 +100,7 @@ public class Gen6EvolutionsSheetPanel extends JPanel {
 
         JLabel infoLabel = new JLabel("Evolution Methods (XY/ORAS) - Edit how Pokemon evolve");
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -108,9 +108,11 @@ public class Gen6EvolutionsSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new EvolutionsTableModel(pokemonList, moveList, itemList, maxEvolutions, romHandler);
+        // Keep Species.evolutionsTo in sync after every edit and on restore (fireTableDataChanged).
+        tableModel.addTableModelListener(e -> EditorUtils.rebuildEvolutionReverseLinks(romHandler.getSpeciesInclFormes()));
 
         // Frozen table
         TableModel frozenModel = new AbstractTableModel() {
@@ -299,16 +301,16 @@ public class Gen6EvolutionsSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
         EditorUtils.linkVerticalScrollBars(frozenScrollPane, mainScrollPane);
 
@@ -490,10 +492,12 @@ public class Gen6EvolutionsSheetPanel extends JPanel {
         stopEditing();
         ManualEditRegistry.getInstance().addEntries("Evolutions (Gen 6)", collectEvolutionChangesForLog());
 
-        JOptionPane.showMessageDialog(this,
-                "- Evolutions updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Evolutions updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
         commitChanges();
     }
 

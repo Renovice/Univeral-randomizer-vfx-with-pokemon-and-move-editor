@@ -42,6 +42,7 @@ public class CustomNamesEditorDialog extends javax.swing.JDialog {
 
     private static final long serialVersionUID = -1421503126547242929L;
     private boolean pendingChanges;
+    private boolean loadFailed;
 
     /**
      * Creates new form CustomNamesEditorDialog
@@ -62,6 +63,7 @@ public class CustomNamesEditorDialog extends javax.swing.JDialog {
             populateNames(doublesTrainerClassesText, cns.getDoublesTrainerClasses());
             populateNames(nicknamesText, cns.getPokemonNicknames());
         } catch (IOException ex) {
+            loadFailed = true;
             java.awt.EventQueue.invokeLater(() -> JOptionPane.showMessageDialog(CustomNamesEditorDialog.this,
                     "Your custom names file is for a different randomizer version or otherwise corrupt."));
         }
@@ -118,6 +120,14 @@ public class CustomNamesEditorDialog extends javax.swing.JDialog {
     }// GEN-LAST:event_closeBtnActionPerformed
 
     private boolean save() {
+        if (loadFailed) {
+            int result = JOptionPane.showConfirmDialog(this,
+                    "Your existing custom names file could not be read and will be OVERWRITTEN by what is currently in the editor.\nContinue?",
+                    "Overwrite unreadable file?", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (result != JOptionPane.YES_OPTION) {
+                return false;
+            }
+        }
         CustomNamesSet cns = new CustomNamesSet();
         cns.setTrainerNames(getNameList(trainerNamesText));
         cns.setTrainerClasses(getNameList(trainerClassesText));
@@ -128,6 +138,7 @@ public class CustomNamesEditorDialog extends javax.swing.JDialog {
             byte[] data = cns.getBytes();
             FileFunctions.writeBytesToFile(RootPath.path + SysConstants.customNamesFile, data);
             pendingChanges = false;
+            loadFailed = false;
             JOptionPane.showMessageDialog(this, "Custom names saved.");
             return true;
         } catch (IOException ex) {

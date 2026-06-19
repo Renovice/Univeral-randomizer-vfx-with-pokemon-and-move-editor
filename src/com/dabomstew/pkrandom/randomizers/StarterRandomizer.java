@@ -32,7 +32,10 @@ public class StarterRandomizer extends Randomizer {
 
             if (pickedStarters.size() == starterCount) {
                 //The customs were all we needed
-                romHandler.setStarters(pickedStarters);
+                if (!romHandler.setStarters(pickedStarters)) {
+                    throw new RandomizationException("Failed to set starters.");
+                }
+                changesMade = true;
                 return;
             } else if (pickedStarters.size() > starterCount) {
                 //what.
@@ -96,15 +99,23 @@ public class StarterRandomizer extends Randomizer {
                     pickedStarters.addAll(chooseStartersFireWaterGrass(choosableByType));
                 }
             } else if (typeSingle) {
+                int singleNeeded = starterCount - pickedStarters.size();
                 if(singleType == null) {
-                    singleType = chooseTypeForStarters(starterCount - pickedStarters.size(), choosableByType);
+                    singleType = chooseTypeForStarters(singleNeeded, choosableByType);
                 }
-                pickedStarters.addAll(chooseStartersBasic(starterCount - pickedStarters.size(),
-                                choosableByType.get(singleType)));
+                SpeciesSet singleTypePool = choosableByType.get(singleType);
+                if(singleTypePool == null || singleTypePool.size() < singleNeeded) {
+                    throw new RandomizationException("Not enough " + singleType
+                            + "-type starters available! (" + (singleTypePool == null ? 0 : singleTypePool.size())
+                            + " found, " + singleNeeded + " needed.)");
+                }
+                pickedStarters.addAll(chooseStartersBasic(singleNeeded, singleTypePool));
             } //no other case
         }
 
-        romHandler.setStarters(pickedStarters);
+        if (!romHandler.setStarters(pickedStarters)) {
+            throw new RandomizationException("Failed to set starters.");
+        }
         changesMade = true;
     }
 
@@ -120,7 +131,8 @@ public class StarterRandomizer extends Randomizer {
         Collections.shuffle(types, random);
 
         for (Type type : types) {
-            if(availableByType.get(type).size() > numStartersNeeded) {
+            SpeciesSet candidates = availableByType.get(type);
+            if(candidates != null && candidates.size() >= numStartersNeeded) {
                 return type;
             }
         }
@@ -264,6 +276,10 @@ public class StarterRandomizer extends Randomizer {
         List<Species> picks = new ArrayList<>();
 
         while (picks.size() < numberPicks) {
+            if (available.isEmpty()) {
+                throw new RandomizationException("Not enough distinct starter types available to choose "
+                        + "unique-type starters with the current settings.");
+            }
             Species picked = available.getRandomSpecies(random);
             picks.add(picked);
             available.remove(picked);

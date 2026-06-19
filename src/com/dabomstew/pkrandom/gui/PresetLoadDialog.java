@@ -380,6 +380,8 @@ public class PresetLoadDialog extends JDialog {
                 customNames = CustomNamesSet.readNamesFromFile();
             } catch (IOException e) {
                 e.printStackTrace();
+                JOptionPane.showMessageDialog(this, bundle.getString("GUI.cantLoadCustomNames"));
+                return;
             }
         }
         if (cpgUseCheckButton.isSelected()) {

@@ -31,6 +31,7 @@ import com.dabomstew.pkrandom.updaters.SpeciesBaseStatUpdater;
 import com.dabomstew.pkrandom.updaters.TypeEffectivenessUpdater;
 import com.dabomstew.pkrandom.updaters.Updater;
 import com.dabomstew.pkromio.MiscTweak;
+import com.dabomstew.pkromio.exceptions.RomIOException;
 import com.dabomstew.pkromio.graphics.packs.CustomPlayerGraphics;
 import com.dabomstew.pkromio.romhandlers.Gen1RomHandler;
 import com.dabomstew.pkromio.romhandlers.RomHandler;
@@ -204,7 +205,13 @@ public class GameRandomizer {
 
             results.checkValue = new CheckValueCalculator(romHandler, settings).calculate();
 
-            romHandler.saveRom(filename, seed, saveAsDirectory);
+            boolean saved = romHandler.saveRom(filename, seed, saveAsDirectory);
+            if (!saved) {
+                // The ROM handler returned false without throwing (e.g. AbstractGBRomHandler.saveRomFile
+                // swallows a non-"Access is denied" IOException and returns false). Treat this as a
+                // failed save so callers don't report success and write a log for a bad output.
+                throw new RomIOException("Failed to save ROM to " + filename);
+            }
 
             try {
                 logger.logResults(log, startTime);
@@ -294,6 +301,11 @@ public class GameRandomizer {
         // Apply metronome only mode now that trainers have been dealt with
         if (settings.getMovesetsMod() == Settings.MovesetsMod.METRONOME_ONLY) {
             speciesMovesetRandomizer.metronomeOnlyMode();
+            // Metronome-only resets every trainer Pokémon's moves to Metronome, which can leave Gen 7
+            // trainers holding type Z-Crystals for moves they no longer have. The earlier
+            // maybeFixTrainerZCrystals() already ran (before metronome-only was applied), so repair
+            // Z-Crystals again here so they match the reset movesets. (No-op outside Gen 7.)
+            trainerPokeRandomizer.randomUsableZCrystals();
         }
 
         maybeRandomizeStaticPokemon();
@@ -387,6 +399,10 @@ public class GameRandomizer {
                 break;
             case RANDOM:
                 speciesBSRandomizer.randomizeSpeciesStats();
+                break;
+            case GATED:
+                speciesBSRandomizer.gateSpeciesStats();
+                break;
         }
     }
 

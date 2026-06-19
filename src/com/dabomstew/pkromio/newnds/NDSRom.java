@@ -428,6 +428,13 @@ public class NDSRom {
         short crc = CRC16.calculate(headerForCRC, 0, 0x15E);
         writeToFile(fNew, 0x15E, 2, (crc & 0xFFFF));
 
+        // Truncate to the rebuilt image length. The file was opened with "rw",
+        // which does not truncate, so overwriting a pre-existing larger file
+        // would otherwise leave a stale tail of bytes after the real ROM data.
+        // application_end_offset is the 4-byte-aligned end of the last file and
+        // equals the full size of the rebuilt image.
+        fNew.setLength(application_end_offset);
+
         // done
         fNew.close();
         closeROM();
@@ -588,7 +595,7 @@ public class NDSRom {
     }
 
     public void writeOverlay(int number, byte[] data) throws IOException {
-        if (number >= 0 && number <= arm9overlays.length) {
+        if (number >= 0 && number < arm9overlays.length) {
             arm9overlays[number].writeOverride(data);
         }
     }

@@ -75,7 +75,7 @@ public class PersonalSheetPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         // Create toolbar with modern styling
         add(createStyledToolbar(), BorderLayout.NORTH);
@@ -87,9 +87,9 @@ public class PersonalSheetPanel extends JPanel {
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         // Styled buttons
@@ -122,7 +122,7 @@ public class PersonalSheetPanel extends JPanel {
 
         JLabel infoLabel = new JLabel("Edit Pokemon data directly in the table");
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -130,7 +130,7 @@ public class PersonalSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         // Create table model
         tableModel = new PokemonDataTableModel(pokemonList, romHandler, itemList);
@@ -325,16 +325,16 @@ public class PersonalSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
 
         // Sync scrolling
@@ -428,10 +428,12 @@ public class PersonalSheetPanel extends JPanel {
         // Commit changes by updating the backup
         commitChanges();
 
-        JOptionPane.showMessageDialog(this,
-                "- Pokemon data updated successfully!\n\nChanges are stored in memory and will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Pokemon data updated successfully!\n\nChanges are stored in memory and will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
     }
 
     private void reload() {
@@ -484,7 +486,7 @@ public class PersonalSheetPanel extends JPanel {
         }
 
         try {
-            int applied = EditorUtils.applyCsvDataToTable(csvData.getRows(), tableModel, true);
+            int applied = EditorUtils.applyCsvDataToTable(csvData.getRows(), tableModel, true, this);
             tableModel.fireTableDataChanged();
             if (frozenTable != null) {
                 frozenTable.repaint();
@@ -594,12 +596,12 @@ public class PersonalSheetPanel extends JPanel {
                     c.setBackground(getTypeColor(type));
                     c.setForeground(Color.WHITE);
                 } catch (Exception e) {
-                    c.setBackground(TableLayoutDefaults.EVEN_ROW_COLOR);
-                    c.setForeground(Color.BLACK);
+                    c.setBackground(TableLayoutDefaults.evenRowColor());
+                    c.setForeground(EditorTheme.text());
                 }
             } else if (!isSelected) {
-                c.setBackground(row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR);
-                c.setForeground(Color.BLACK);
+                c.setBackground(row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor());
+                c.setForeground(EditorTheme.text());
             }
 
             setBorder(noFocusBorder);
@@ -645,7 +647,7 @@ public class PersonalSheetPanel extends JPanel {
                 case FAIRY:
                     return new Color(238, 153, 238);
                 default:
-                    return Color.WHITE;
+                    return EditorTheme.surface();
             }
         }
     }
@@ -747,7 +749,7 @@ public class PersonalSheetPanel extends JPanel {
                 boolean isSelected, boolean hasFocus, int row, int column) {
             setSelected(value != null && (Boolean) value);
             setBackground(isSelected ? table.getSelectionBackground()
-                    : (row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR));
+                    : (row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor()));
             return this;
         }
     }
@@ -863,9 +865,16 @@ public class PersonalSheetPanel extends JPanel {
                 case 17:
                     return p.getSpdefEvYield(); // SP_DEF EV Yield
                 case 18:
-                    return getItemName(p.getCommonHeldItem()); // Uncommon Held Item
+                    // Guaranteed-item species store the real item only in guaranteedHeldItem
+                    // (both ROM slots equal), leaving common/rare null. Surface it here so the
+                    // item isn't hidden as 'None'.
+                    return getItemName(p.getGuaranteedHeldItem() != null
+                            ? p.getGuaranteedHeldItem()
+                            : p.getCommonHeldItem()); // Uncommon Held Item
                 case 19:
-                    return getItemName(p.getRareHeldItem()); // Rare Held Item
+                    return getItemName(p.getGuaranteedHeldItem() != null
+                            ? p.getGuaranteedHeldItem()
+                            : p.getRareHeldItem()); // Rare Held Item
                 case 20:
                     return p.getGenderRatio(); // Gender Ratio
                 case 21:
@@ -958,9 +967,14 @@ public class PersonalSheetPanel extends JPanel {
                         p.setSpdefEvYield(parseBoundedInt(val, 0, 3));
                         break; // SP_DEF EV Yield
                     case 18:
+                        // A guaranteed held item overrides both slots on ROM write, so clear it
+                        // when the user edits a per-slot value or the edit would be discarded.
+                        // Preserve the existing item in the other (rare) slot if it was guaranteed.
+                        promoteGuaranteedToSlots(p);
                         p.setCommonHeldItem(findItem(val.toString()));
                         break; // Uncommon Held Item
                     case 19:
+                        promoteGuaranteedToSlots(p);
                         p.setRareHeldItem(findItem(val.toString()));
                         break; // Rare Held Item
                     case 20:
@@ -1133,6 +1147,19 @@ public class PersonalSheetPanel extends JPanel {
                     return item;
             }
             return null;
+        }
+
+        // When a species uses the 'guaranteed' held-item layout the real item lives only in
+        // guaranteedHeldItem (common/rare are null) and the ROM writer overwrites BOTH slots
+        // from it, discarding any per-slot edit. Before editing a slot, copy the guaranteed
+        // item into the common/rare slots and clear guaranteed so per-slot edits take effect.
+        private void promoteGuaranteedToSlots(Species p) {
+            Item guaranteed = p.getGuaranteedHeldItem();
+            if (guaranteed != null) {
+                p.setCommonHeldItem(guaranteed);
+                p.setRareHeldItem(guaranteed);
+                p.setGuaranteedHeldItem(null);
+            }
         }
     }
 

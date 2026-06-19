@@ -645,7 +645,7 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             moves[i].hitratio = ((rom[offs + i * 0xC + 3] & 0xFF));
             moves[i].power = rom[offs + i * 0xC + 1] & 0xFF;
             moves[i].pp = rom[offs + i * 0xC + 4] & 0xFF;
-            moves[i].type = Gen3Constants.typeTable[rom[offs + i * 0xC + 2]];
+            moves[i].type = Gen3Constants.typeTable[rom[offs + i * 0xC + 2] & 0xFF];
             moves[i].target = rom[offs + i * 0xC + 6] & 0xFF;
             moves[i].category = GBConstants.physicalTypes.contains(moves[i].type) ? MoveCategory.PHYSICAL : MoveCategory.SPECIAL;
             if (moves[i].power == 0 && !GlobalConstants.noPowerNonStatusMoves.contains(i)) {
@@ -1741,7 +1741,9 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             tr.offset = trOffset;
             tr.index = i;
             int trainerclass = rom[trOffset + 1] & 0xFF;
-            tr.trainerclass = (rom[trOffset + 2] & 0x80) > 0 ? 1 : 0;
+            // Offset +1 is the trainer-class id; offset +2's 0x80 bit is the gender flag.
+            // Assign the real class byte (matching all other generations) instead of the gender bit.
+            tr.trainerclass = trainerclass;
 
             int pokeDataType = rom[trOffset] & 0xFF;
             if (rom[trOffset + (entryLen - 16)] == 0x01) {
@@ -1850,7 +1852,9 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
 			int currentOffset = mossdeepStevenOffset + (i * 20);
 			TrainerPokemon tp = new TrainerPokemon();
 			tp.setSpecies(pokesInternal[readWord(currentOffset)]);
-			tp.setIVs(rom[currentOffset + 2]);
+			// Scale the ROM "difficulty" byte (0-255) to the 0-31 IV scale used by all
+			// other Gen 3 trainers, and mask to read it as an unsigned byte.
+			tp.setIVs(((rom[currentOffset + 2] & 0xFF) * 31) / 255);
 			tp.setLevel(rom[currentOffset + 3]);
 			for (int move = 0; move < 4; move++) {
 				tp.getMoves()[move] = readWord(currentOffset + 12 + (move * 2));
@@ -2008,11 +2012,16 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
         // precautions would need to be taken so the mossdeepSteven Trainer's properties aren't changed.
         // Adding an extra Pokémon is normally fine with Trainers; but it would cause corruption with mossdeepSteven.
         // ...thus the custom implementation below.
-		for (int i = 0; i < 3; i++) {
+		// This block is a fixed 3-slot Pokemon array, not a real trainer. If the editor shrank
+		// the team below 3, only overwrite the slots we have (the rest keep their original data)
+		// instead of throwing IndexOutOfBounds and aborting the whole ROM save.
+		for (int i = 0; i < 3 && i < mossdeepSteven.pokemon.size(); i++) {
 			int currentOffset = mossdeepStevenOffset + (i * 20);
 			TrainerPokemon tp = mossdeepSteven.pokemon.get(i);
 			writeWord(currentOffset, pokedexToInternal[tp.getSpecies().getNumber()]);
-			writeByte(currentOffset + 2, (byte) tp.getIVs());
+			// Un-scale the 0-31 IV back to the ROM "difficulty" byte (0-255), matching
+			// the conversion used for all other Gen 3 trainers.
+			writeByte(currentOffset + 2, (byte) Math.min(255, 1 + (tp.getIVs() * 255) / 31));
 			writeByte(currentOffset + 3, (byte) tp.getLevel());
 			for (int move = 0; move < 4; move++) {
 				writeWord(currentOffset + 12 + (move * 2), tp.getMoves()[move]);
@@ -2178,17 +2187,32 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
     @Override
     public void setEggMoves(Map<Integer, List<Integer>> eggMoves) {
         int offset = romEntry.getIntValue("EggMoves");
+        // The egg-move table sits inside the fixed ROM image, terminated by 0xFFFF. Find the
+        // original terminator and never write past it — otherwise adding more egg moves than
+        // the vanilla block holds would silently overwrite adjacent data and corrupt the ROM.
+        // Anything that doesn't fit is dropped (same fail-safe behaviour as Gen4/Gen5).
+        int limit = offset;
+        while (limit < rom.length - 2 && (FileFunctions.read2ByteInt(rom, limit) & 0xFFFF) != 0xFFFF) {
+            limit += 2;
+        }
         int currentOffset = offset;
         List<Integer> speciesList = new ArrayList<>(eggMoves.keySet());
         Collections.sort(speciesList);
+        outer:
         for (int species : speciesList) {
             List<Integer> movesForSpecies = eggMoves.get(species);
             if (movesForSpecies == null || movesForSpecies.isEmpty()) {
                 continue;
             }
+            if (currentOffset + 2 > limit) {
+                break; // no room left even for a species marker (keep room for the terminator)
+            }
             FileFunctions.write2ByteInt(rom, currentOffset, pokedexToInternal[species] + 20000);
             currentOffset += 2;
             for (int move : movesForSpecies) {
+                if (currentOffset + 2 > limit) {
+                    break outer;
+                }
                 FileFunctions.write2ByteInt(rom, currentOffset, move);
                 currentOffset += 2;
             }
@@ -3185,7 +3209,10 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             List<Item> shopItems = new ArrayList<>();
             int val = FileFunctions.read2ByteInt(rom, offset);
             while (val != 0x0000) {
-                shopItems.add(items.get(Gen3Constants.itemIDToStandard(val)));
+                int standardId = Gen3Constants.itemIDToStandard(val);
+                if (standardId >= 0 && standardId < items.size() && items.get(standardId) != null) {
+                    shopItems.add(items.get(standardId));
+                }
                 offset += 2;
                 val = FileFunctions.read2ByteInt(rom, offset);
             }
@@ -3281,7 +3308,13 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             for (int i = 0; i < pickupItemCount; i++) {
                 int itemOffset = pickupItemsTableOffset + (sizeOfPickupEntry * i);
                 int id = Gen3Constants.itemIDToStandard(FileFunctions.read2ByteInt(rom, itemOffset));
-                PickupItem pickupItem = new PickupItem(items.get(id));
+                Item item = (id >= 0 && id < items.size()) ? items.get(id) : null;
+                if (item == null) {
+                    // Corrupted/hacked pickup table references an invalid item id; substitute a
+                    // valid item so the fixed-size table and probability assignment stay aligned.
+                    item = items.get(Gen3Constants.itemIDToStandard(1));
+                }
+                PickupItem pickupItem = new PickupItem(item);
                 pickupItems.add(pickupItem);
             }
         }
@@ -3816,8 +3849,9 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
         List<Item> fieldItems = new ArrayList<>();
 
         for (int offset : itemOffs) {
-            Item item = items.get(Gen3Constants.itemIDToStandard(readWord(offset)));
-            if (item.isAllowed()) {
+            int standardId = Gen3Constants.itemIDToStandard(readWord(offset));
+            Item item = (standardId >= 0 && standardId < items.size()) ? items.get(standardId) : null;
+            if (item != null && item.isAllowed()) {
                 fieldItems.add(item);
             }
         }
@@ -3835,8 +3869,9 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
         Iterator<Item> iterItems = fieldItems.iterator();
 
         for (int offset : itemOffs) {
-            Item current = items.get(Gen3Constants.itemIDToStandard(readWord(offset)));
-            if (current.isAllowed()) {
+            int standardId = Gen3Constants.itemIDToStandard(readWord(offset));
+            Item current = (standardId >= 0 && standardId < items.size()) ? items.get(standardId) : null;
+            if (current != null && current.isAllowed()) {
                 // Replace it
                 writeWord(offset, Gen3Constants.itemIDToInternal(iterItems.next().getId()));
             }

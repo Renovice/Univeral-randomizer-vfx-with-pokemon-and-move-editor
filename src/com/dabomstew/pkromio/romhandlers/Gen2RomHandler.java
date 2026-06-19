@@ -252,7 +252,7 @@ public class Gen2RomHandler extends AbstractGBCRomHandler {
             moves[i].hitratio = ((rom[offs + (i - 1) * 7 + 4] & 0xFF)) / 255.0 * 100;
             moves[i].power = rom[offs + (i - 1) * 7 + 2] & 0xFF;
             moves[i].pp = rom[offs + (i - 1) * 7 + 5] & 0xFF;
-            moves[i].type = Gen2Constants.typeTable[rom[offs + (i - 1) * 7 + 3]];
+            moves[i].type = Gen2Constants.typeTable[rom[offs + (i - 1) * 7 + 3] & 0xFF];
             moves[i].category = GBConstants.physicalTypes.contains(moves[i].type) ? MoveCategory.PHYSICAL : MoveCategory.SPECIAL;
             if (moves[i].power == 0 && !GlobalConstants.noPowerNonStatusMoves.contains(i)) {
                 moves[i].category = MoveCategory.STATUS;
@@ -285,6 +285,8 @@ public class Gen2RomHandler extends AbstractGBCRomHandler {
             }
 
             double secondaryEffectChance = ((rom[offs + (i - 1) * 7 + 6] & 0xFF)) / 255.0 * 100;
+            // Populate the generic model field so it is non-zero and survives a round-trip (see saveMoves).
+            moves[i].secondaryEffectChance = (int) Math.round(secondaryEffectChance);
             loadStatChangesFromEffect(moves[i], secondaryEffectChance);
             loadStatusFromEffect(moves[i], secondaryEffectChance);
             loadMiscMoveInfoFromEffect(moves[i], secondaryEffectChance);
@@ -553,8 +555,16 @@ public class Gen2RomHandler extends AbstractGBCRomHandler {
             if (hitratio > 255) {
                 hitratio = 255;
             }
+            // Reconstruct the +6 secondary-effect/status/flinch chance byte so chance edits are persisted.
+            int effectChance = (int) Math.round(moves[i].secondaryEffectChance * 2.55);
+            if (effectChance < 0) {
+                effectChance = 0;
+            }
+            if (effectChance > 255) {
+                effectChance = 255;
+            }
             writeBytes(offs + (i - 1) * 7 + 1, new byte[]{(byte) moves[i].effectIndex, (byte) moves[i].power,
-                    Gen2Constants.typeToByte(moves[i].type), (byte) hitratio, (byte) moves[i].pp});
+                    Gen2Constants.typeToByte(moves[i].type), (byte) hitratio, (byte) moves[i].pp, (byte) effectChance});
         }
     }
 
@@ -587,17 +597,17 @@ public class Gen2RomHandler extends AbstractGBCRomHandler {
     }
 
     private void saveBasicPokeStats(Species pkmn, int offset) {
-        writeByte(offset + Gen2Constants.bsHPOffset, (byte) pkmn.getHp());
-        writeByte(offset + Gen2Constants.bsAttackOffset, (byte) pkmn.getAttack());
-        writeByte(offset + Gen2Constants.bsDefenseOffset, (byte) pkmn.getDefense());
-        writeByte(offset + Gen2Constants.bsSpeedOffset, (byte) pkmn.getSpeed());
-        writeByte(offset + Gen2Constants.bsSpAtkOffset, (byte) pkmn.getSpatk());
-        writeByte(offset + Gen2Constants.bsSpDefOffset, (byte) pkmn.getSpdef());
+        writeByte(offset + Gen2Constants.bsHPOffset, (byte) Math.max(0, Math.min(255, pkmn.getHp())));
+        writeByte(offset + Gen2Constants.bsAttackOffset, (byte) Math.max(0, Math.min(255, pkmn.getAttack())));
+        writeByte(offset + Gen2Constants.bsDefenseOffset, (byte) Math.max(0, Math.min(255, pkmn.getDefense())));
+        writeByte(offset + Gen2Constants.bsSpeedOffset, (byte) Math.max(0, Math.min(255, pkmn.getSpeed())));
+        writeByte(offset + Gen2Constants.bsSpAtkOffset, (byte) Math.max(0, Math.min(255, pkmn.getSpatk())));
+        writeByte(offset + Gen2Constants.bsSpDefOffset, (byte) Math.max(0, Math.min(255, pkmn.getSpdef())));
         writeByte(offset + Gen2Constants.bsPrimaryTypeOffset, Gen2Constants.typeToByte(pkmn.getPrimaryType(false)));
         byte secondaryTypeByte = pkmn.getSecondaryType(false) == null ? rom[offset + Gen2Constants.bsPrimaryTypeOffset]
                 : Gen2Constants.typeToByte(pkmn.getSecondaryType(false));
         writeByte(offset + Gen2Constants.bsSecondaryTypeOffset, secondaryTypeByte);
-        writeByte(offset + Gen2Constants.bsCatchRateOffset, (byte) pkmn.getCatchRate());
+        writeByte(offset + Gen2Constants.bsCatchRateOffset, (byte) Math.max(0, Math.min(255, pkmn.getCatchRate())));
 
         writeByte(offset + Gen2Constants.bsCommonHeldItemOffset, pkmn.getCommonHeldItem() == null ? 0
                 : (byte) Gen2Constants.itemIDToInternal(pkmn.getCommonHeldItem().getId()));
@@ -1439,7 +1449,7 @@ public class Gen2RomHandler extends AbstractGBCRomHandler {
             if (levelOffsets.length <= i) {
                 return 1;
             }
-            return rom[levelOffsets[i]];
+            return rom[levelOffsets[i]] & 0xFF;
         }
 
         public void setLevel(byte[] rom, int level, int i) {
@@ -2928,6 +2938,9 @@ public class Gen2RomHandler extends AbstractGBCRomHandler {
     }
 
     private void writePalette(int offset, Palette palette) {
+        if (palette.size() != 2) {
+            throw new IllegalArgumentException("Invalid Palette, must have exactly 2 colors.");
+        }
         writeBytes(offset, palette.toBytes());
     }
 

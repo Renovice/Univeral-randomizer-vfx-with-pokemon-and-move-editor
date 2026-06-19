@@ -76,7 +76,7 @@ public class Gen6PersonalSheetPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createStyledToolbar(), BorderLayout.NORTH);
         add(createFrozenColumnTable(), BorderLayout.CENTER);
@@ -84,8 +84,8 @@ public class Gen6PersonalSheetPanel extends JPanel {
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
-        toolbar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)));
+        toolbar.setBackground(EditorTheme.toolbar());
+        toolbar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
         saveButton.addActionListener(e -> save());
@@ -118,7 +118,7 @@ public class Gen6PersonalSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         // Create table model
         tableModel = new PokemonDataTableModel(pokemonList, romHandler, itemList);
@@ -308,16 +308,16 @@ public class Gen6PersonalSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
 
         // Sync scrolling
@@ -362,7 +362,7 @@ public class Gen6PersonalSheetPanel extends JPanel {
                 column.setCellRenderer(new TypeCellRenderer());
                 column.setCellEditor(new TypeComboBoxEditor(romHandler));
             } else if (modelCol >= PokemonDataTableModel.COL_COMMON_ITEM
-                    && modelCol <= PokemonDataTableModel.COL_VERY_RARE_ITEM) {
+                    && modelCol <= PokemonDataTableModel.COL_GUARANTEED_ITEM) {
                 column.setCellEditor(new ItemComboBoxEditor(itemList));
             } else if (modelCol == PokemonDataTableModel.COL_GROWTH_RATE) {
                 column.setCellEditor(new GrowthRateComboBoxEditor());
@@ -406,7 +406,6 @@ public class Gen6PersonalSheetPanel extends JPanel {
                 return 65;
             case PokemonDataTableModel.COL_COMMON_ITEM:
             case PokemonDataTableModel.COL_RARE_ITEM:
-            case PokemonDataTableModel.COL_VERY_RARE_ITEM:
                 return 150;
             case PokemonDataTableModel.COL_GENDER_RATIO:
                 return 90;
@@ -447,10 +446,12 @@ public class Gen6PersonalSheetPanel extends JPanel {
             ManualEditRegistry.getInstance().addEntries("Personal Sheet", changes);
         }
 
-        JOptionPane.showMessageDialog(this,
-                "- Pokemon data updated successfully!\n\nChanges are stored in memory and will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Pokemon data updated successfully!\n\nChanges are stored in memory and will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
     }
 
     private List<String> collectChangesForLog() {
@@ -463,50 +464,120 @@ public class Gen6PersonalSheetPanel extends JPanel {
             if (backup == null)
                 continue;
 
-            StringBuilder sb = new StringBuilder();
-            sb.append(String.format("Pokemon #%d: %s", p.getNumber(), EditorUtils.speciesNameWithSuffix(p)));
+            List<String> diffs = new ArrayList<>();
+            addIntDiff(diffs, "HP", backup.hp, p.getHp());
+            addIntDiff(diffs, "ATK", backup.attack, p.getAttack());
+            addIntDiff(diffs, "DEF", backup.defense, p.getDefense());
+            addIntDiff(diffs, "SPD", backup.speed, p.getSpeed());
+            addIntDiff(diffs, "SP.ATK", backup.spatk, p.getSpatk());
+            addIntDiff(diffs, "SP.DEF", backup.spdef, p.getSpdef());
 
-            boolean hasChanges = false;
+            addStringDiff(diffs, "Type 1", formatType(backup.primaryType), formatType(p.getPrimaryType(false)));
+            addStringDiff(diffs, "Type 2", formatType(backup.secondaryType), formatType(p.getSecondaryType(false)));
 
-            if (backup.hp != p.getHp()) {
-                sb.append(String.format(" | HP: %d -> %d", backup.hp, p.getHp()));
-                hasChanges = true;
-            }
-            if (backup.attack != p.getAttack()) {
-                sb.append(String.format(" | ATK: %d -> %d", backup.attack, p.getAttack()));
-                hasChanges = true;
-            }
-            if (backup.defense != p.getDefense()) {
-                sb.append(String.format(" | DEF: %d -> %d", backup.defense, p.getDefense()));
-                hasChanges = true;
-            }
-            if (backup.speed != p.getSpeed()) {
-                sb.append(String.format(" | SPEED: %d -> %d", backup.speed, p.getSpeed()));
-                hasChanges = true;
-            }
-            if (backup.spatk != p.getSpatk()) {
-                sb.append(String.format(" | SP_ATK: %d -> %d", backup.spatk, p.getSpatk()));
-                hasChanges = true;
-            }
-            if (backup.spdef != p.getSpdef()) {
-                sb.append(String.format(" | SP_DEF: %d -> %d", backup.spdef, p.getSpdef()));
-                hasChanges = true;
+            addIntDiff(diffs, "Catch Rate", backup.catchRate, p.getCatchRate());
+            addIntDiff(diffs, "Exp Yield", backup.expYield, p.getExpYield());
+
+            addIntDiff(diffs, "HP EV", backup.hpEvYield, p.getHpEvYield());
+            addIntDiff(diffs, "ATK EV", backup.attackEvYield, p.getAttackEvYield());
+            addIntDiff(diffs, "DEF EV", backup.defenseEvYield, p.getDefenseEvYield());
+            addIntDiff(diffs, "SPD EV", backup.speedEvYield, p.getSpeedEvYield());
+            addIntDiff(diffs, "SP.ATK EV", backup.spatkEvYield, p.getSpatkEvYield());
+            addIntDiff(diffs, "SP.DEF EV", backup.spdefEvYield, p.getSpdefEvYield());
+
+            // Gen6/Gen7 has no Dark Grass item slot, so it is intentionally omitted here.
+            addStringDiff(diffs, "Guaranteed Item", formatItem(backup.guaranteedHeldItem),
+                    formatItem(p.getGuaranteedHeldItem()));
+            addStringDiff(diffs, "Common Item", formatItem(backup.commonHeldItem), formatItem(p.getCommonHeldItem()));
+            addStringDiff(diffs, "Rare Item", formatItem(backup.rareHeldItem), formatItem(p.getRareHeldItem()));
+
+            addIntDiff(diffs, "Gender Ratio", backup.genderRatio, p.getGenderRatio());
+            addIntDiff(diffs, "Hatch Counter", backup.hatchCounter, p.getHatchCounter());
+            addIntDiff(diffs, "Base Happiness", backup.baseHappiness, p.getBaseHappiness());
+            addStringDiff(diffs, "Growth Rate", formatGrowthCurve(backup.growthCurve),
+                    formatGrowthCurve(p.getGrowthCurve()));
+            addStringDiff(diffs, "Egg Group 1", eggGroupName(backup.eggGroup1), eggGroupName(p.getEggGroup1()));
+            addStringDiff(diffs, "Egg Group 2", eggGroupName(backup.eggGroup2), eggGroupName(p.getEggGroup2()));
+
+            addStringDiff(diffs, "Ability 1", formatAbilityLog(backup.ability1), formatAbilityLog(p.getAbility1()));
+            addStringDiff(diffs, "Ability 2", formatAbilityLog(backup.ability2), formatAbilityLog(p.getAbility2()));
+            addStringDiff(diffs, "Ability 3", formatAbilityLog(backup.ability3), formatAbilityLog(p.getAbility3()));
+
+            addIntDiff(diffs, "Run Chance", backup.runChance, p.getRunChance());
+            addIntDiff(diffs, "Height", backup.height, p.getHeight());
+            addIntDiff(diffs, "Weight", backup.weight, p.getWeight());
+            addIntDiff(diffs, "Color", backup.color, p.getColor());
+            if (backup.flip != p.isFlip()) {
+                diffs.add(String.format("Flip (old %s) -> (new %s)", backup.flip, p.isFlip()));
             }
 
-            if (!Objects.equals(backup.primaryType, p.getPrimaryType(false))) {
-                sb.append(String.format(" | Type1: %s -> %s", backup.primaryType, p.getPrimaryType(false)));
-                hasChanges = true;
-            }
-            if (!Objects.equals(backup.secondaryType, p.getSecondaryType(false))) {
-                sb.append(String.format(" | Type2: %s -> %s", backup.secondaryType, p.getSecondaryType(false)));
-                hasChanges = true;
-            }
-
-            if (hasChanges) {
-                changes.add(sb.toString());
+            if (!diffs.isEmpty()) {
+                changes.add(String.format("Pokemon #%d: %s | %s", p.getNumber(),
+                        EditorUtils.speciesNameWithSuffix(p), String.join(", ", diffs)));
             }
         }
         return changes;
+    }
+
+    private void addIntDiff(List<String> diffs, String label, int before, int after) {
+        if (before != after) {
+            diffs.add(String.format("%s (old %d) -> (new %d)", label, before, after));
+        }
+    }
+
+    private void addStringDiff(List<String> diffs, String label, String before, String after) {
+        if (!Objects.equals(before, after)) {
+            diffs.add(String.format("%s (old %s) -> (new %s)", label, before, after));
+        }
+    }
+
+    private String formatType(Type type) {
+        return type != null ? type.name() : "None";
+    }
+
+    private String formatItem(Item item) {
+        return item != null ? item.getName() : "None";
+    }
+
+    private String formatAbilityLog(int abilityId) {
+        if (abilityId == 0) {
+            return "0";
+        }
+        try {
+            String name = romHandler.abilityName(abilityId);
+            return abilityId + ": " + (name != null ? name : "Unknown");
+        } catch (Exception e) {
+            return String.valueOf(abilityId);
+        }
+    }
+
+    private String formatGrowthCurve(ExpCurve curve) {
+        if (curve == null) {
+            return "Medium Fast";
+        }
+        switch (curve) {
+            case MEDIUM_FAST:
+                return "Medium Fast";
+            case ERRATIC:
+                return "Erratic";
+            case FLUCTUATING:
+                return "Fluctuating";
+            case MEDIUM_SLOW:
+                return "Medium Slow";
+            case FAST:
+                return "Fast";
+            case SLOW:
+                return "Slow";
+            default:
+                return curve.name();
+        }
+    }
+
+    private String eggGroupName(int id) {
+        if (id >= 0 && id < EGG_GROUP_NAMES_LOG.length) {
+            return EGG_GROUP_NAMES_LOG[id];
+        }
+        return String.valueOf(id);
     }
 
     private void reload() {
@@ -643,12 +714,12 @@ public class Gen6PersonalSheetPanel extends JPanel {
                     c.setBackground(getTypeColor(type));
                     c.setForeground(Color.WHITE);
                 } catch (Exception e) {
-                    c.setBackground(TableLayoutDefaults.EVEN_ROW_COLOR);
-                    c.setForeground(Color.BLACK);
+                    c.setBackground(TableLayoutDefaults.evenRowColor());
+                    c.setForeground(EditorTheme.text());
                 }
             } else if (!isSelected) {
-                c.setBackground(row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR);
-                c.setForeground(Color.BLACK);
+                c.setBackground(row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor());
+                c.setForeground(EditorTheme.text());
             }
 
             setBorder(noFocusBorder);
@@ -694,7 +765,7 @@ public class Gen6PersonalSheetPanel extends JPanel {
                 case FAIRY:
                     return new Color(238, 153, 238);
                 default:
-                    return Color.WHITE;
+                    return EditorTheme.surface();
             }
         }
     }
@@ -792,7 +863,7 @@ public class Gen6PersonalSheetPanel extends JPanel {
                 boolean isSelected, boolean hasFocus, int row, int column) {
             setSelected(value != null && (Boolean) value);
             setBackground(isSelected ? table.getSelectionBackground()
-                    : (row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR));
+                    : (row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor()));
             return this;
         }
     }
@@ -823,21 +894,22 @@ public class Gen6PersonalSheetPanel extends JPanel {
         static final int COL_COMMON_ITEM = 19;
         static final int COL_RARE_ITEM = 20;
         static final int COL_GUARANTEED_ITEM = 21;
-        static final int COL_VERY_RARE_ITEM = 22;
-        static final int COL_GENDER_RATIO = 23;
-        static final int COL_HATCH_COUNTER = 24;
-        static final int COL_BASE_HAPPINESS = 25;
-        static final int COL_GROWTH_RATE = 26;
-        static final int COL_EGG_GROUP_1 = 27;
-        static final int COL_EGG_GROUP_2 = 28;
-        static final int COL_ABILITY_1 = 29;
-        static final int COL_ABILITY_2 = 30;
-        static final int COL_ABILITY_3 = 31;
-        static final int COL_RUN_CHANCE = 32;
-        static final int COL_HEIGHT = 33;
-        static final int COL_WEIGHT = 34;
-        static final int COL_COLOR = 35;
-        static final int COL_FLIP = 36;
+        // Gen6/Gen7 ROMs have only Common/Rare held-item slots (Guaranteed = both equal);
+        // there is no Dark Grass / "Very Rare" slot, so that column is intentionally absent.
+        static final int COL_GENDER_RATIO = 22;
+        static final int COL_HATCH_COUNTER = 23;
+        static final int COL_BASE_HAPPINESS = 24;
+        static final int COL_GROWTH_RATE = 25;
+        static final int COL_EGG_GROUP_1 = 26;
+        static final int COL_EGG_GROUP_2 = 27;
+        static final int COL_ABILITY_1 = 28;
+        static final int COL_ABILITY_2 = 29;
+        static final int COL_ABILITY_3 = 30;
+        static final int COL_RUN_CHANCE = 31;
+        static final int COL_HEIGHT = 32;
+        static final int COL_WEIGHT = 33;
+        static final int COL_COLOR = 34;
+        static final int COL_FLIP = 35;
 
         private static final String[] COLUMN_NAMES = {
                 "ID", "Name",
@@ -846,7 +918,7 @@ public class Gen6PersonalSheetPanel extends JPanel {
                 "Catch Rate", "Exp Yield",
                 "HP EV\nYield", "ATK EV\nYield", "DEF EV\nYield", "SPEED EV\nYield", "SP_ATK EV\nYield",
                 "SP_DEF EV\nYield",
-                "Common\nHeld Item", "Rare\nHeld Item", "Guaranteed\nItem", "Very Rare\nHeld Item",
+                "Common\nHeld Item", "Rare\nHeld Item", "Guaranteed\nItem",
                 "Gender\nRatio",
                 "Hatch\nCounter",
                 "Base\nHappiness",
@@ -966,8 +1038,6 @@ public class Gen6PersonalSheetPanel extends JPanel {
                 case COL_GUARANTEED_ITEM:
                     // Dynamically show guaranteed item (read-only)
                     return p.getGuaranteedHeldItem() != null ? p.getGuaranteedHeldItem().getName() : "None";
-                case COL_VERY_RARE_ITEM:
-                    return p.getDarkGrassHeldItem() != null ? p.getDarkGrassHeldItem().getName() : "None";
                 case COL_GENDER_RATIO:
                     return p.getGenderRatio();
                 case COL_HATCH_COUNTER:
@@ -1104,9 +1174,6 @@ public class Gen6PersonalSheetPanel extends JPanel {
                     break;
                 case COL_GUARANTEED_ITEM:
                     // Read-only column, do nothing
-                    break;
-                case COL_VERY_RARE_ITEM:
-                    p.setDarkGrassHeldItem(findItemByName(val.toString()));
                     break;
                 case COL_GENDER_RATIO:
                     p.setGenderRatio(parseBoundedInt(val, 0, 255));

@@ -1,6 +1,7 @@
 package com.dabomstew.pkrandom.randomizers;
 
 import com.dabomstew.pkrandom.Settings;
+import com.dabomstew.pkrandom.exceptions.RandomizationException;
 import com.dabomstew.pkromio.gamedata.*;
 import com.dabomstew.pkromio.romhandlers.RomHandler;
 
@@ -34,19 +35,26 @@ public class StaticPokemonRandomizer extends Randomizer {
     public void onlyChangeStaticLevels() {
         int levelModifier = settings.getStaticLevelModifier();
 
+        // Level-only path: change only level/maxLevel, leaving species and formes untouched.
+        // (Do NOT call the species/forme helper here, as it would re-roll cosmetic formes,
+        // collapse alt-form species to their base forme, and overwrite linked encounters.)
         List<StaticEncounter> currentStaticPokemon = romHandler.getStaticPokemon();
         for (StaticEncounter se : currentStaticPokemon) {
             if (!se.isEgg()) {
                 se.setLevel(Math.min(100, (int) Math.round(se.getLevel() * (1 + levelModifier / 100.0))));
+                se.setMaxLevel(Math.min(100, (int) Math.round(se.getMaxLevel() * (1 + levelModifier / 100.0))));
                 for (StaticEncounter linkedStatic : se.getLinkedEncounters()) {
                     if (!linkedStatic.isEgg()) {
                         linkedStatic.setLevel(Math.min(100, (int) Math.round(linkedStatic.getLevel() * (1 + levelModifier / 100.0))));
+                        linkedStatic.setMaxLevel(Math.min(100, (int) Math.round(linkedStatic.getMaxLevel() * (1 + levelModifier / 100.0))));
                     }
                 }
             }
-            setSpeciesAndFormeForStaticAndLinkedEncounters(se, se.getSpecies());
         }
-        romHandler.setStaticPokemon(currentStaticPokemon);
+        if (!romHandler.setStaticPokemon(currentStaticPokemon)) {
+            throw new RandomizationException("Failed to set static Pokémon.");
+        }
+        changesMade = true;
     }
 
     public void randomizeStaticPokemon() {
@@ -306,7 +314,9 @@ public class StaticPokemonRandomizer extends Randomizer {
         }
 
         // Save
-        romHandler.setStaticPokemon(replacements);
+        if (!romHandler.setStaticPokemon(replacements)) {
+            throw new RandomizationException("Failed to set static Pokémon.");
+        }
         changesMade = true;
     }
 

@@ -884,7 +884,7 @@ public class SpeciesSet extends HashSet<Species> {
         if(randomCache == null) {
             randomCache = new ArrayList<>(this);
         }
-        if((double) this.size() / (double) randomCache.size() > CACHE_RESET_FACTOR)
+        if((double) this.size() / (double) randomCache.size() < CACHE_RESET_FACTOR)
         {
             randomCache = new ArrayList<>(this);
         }

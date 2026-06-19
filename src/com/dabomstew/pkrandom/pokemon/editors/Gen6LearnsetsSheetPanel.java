@@ -31,6 +31,8 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
     private final List<Move> moveList;
     private final Map<Integer, List<MoveLearnt>> movesLearnt;
     private final int maxMovesPerPokemon;
+    private static final int MOVE_SLOT_FLOOR = 20; // keep a familiar minimum width
+    private static final int MOVE_SLOT_SPARE = 4; // spare empty slots for adding moves
 
     private JTable frozenTable;
     private JTable mainTable;
@@ -44,7 +46,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         this.romHandler = romHandler;
         this.pokemonList = romHandler.getSpeciesInclFormes();
         this.moveList = romHandler.getMoves();
-        this.movesLearnt = romHandler.getMovesLearnt();
+        this.movesLearnt = EditorDataCache.get(romHandler).getMovesLearnt();
         this.iconCache = PokemonIconCache.get(romHandler);
         this.maxMovesPerPokemon = determineMaxSlots();
         initializeUI();
@@ -52,19 +54,20 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
     }
 
     private int determineMaxSlots() {
-        int max = 0;
+        int largest = 0;
         for (List<MoveLearnt> learnset : movesLearnt.values()) {
             if (learnset != null) {
-                max = Math.max(max, learnset.size());
+                largest = Math.max(largest, learnset.size());
             }
         }
-        // Show exactly the number of slots present in the ROM (at least one column).
-        return Math.max(1, max);
+        // Show every level-up move present in the data (no truncation) plus a few
+        // spare empty slots so the "Add Move" button always has room.
+        return Math.max(MOVE_SLOT_FLOOR, largest + MOVE_SLOT_SPARE);
     }
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createToolbar(), BorderLayout.NORTH);
         add(createFrozenColumnTable(), BorderLayout.CENTER);
@@ -72,9 +75,9 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
 
     private JPanel createToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
@@ -119,7 +122,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
 
         JLabel infoLabel = new JLabel(String.format("Level-up Movesets - XY/ORAS (%d slots)", maxMovesPerPokemon));
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -127,7 +130,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new LearnsetsTableModel(pokemonList, moveList, movesLearnt, maxMovesPerPokemon);
 
@@ -326,16 +329,16 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
         EditorUtils.linkVerticalScrollBars(frozenScrollPane, mainScrollPane);
 
@@ -553,16 +556,40 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         EditorUtils.performFind(this, frozenTable, mainTable, tableModel, 2, findState, options);
     }
 
+    /**
+     * Returns a copy of the learnset map with every placeholder entry (move &lt;= 0)
+     * dropped, so empty/blank slots created during editing or a CSV round-trip never
+     * get written to the ROM. Real entries keep their order.
+     */
+    private Map<Integer, List<MoveLearnt>> createNormalizedLearnsets(Map<Integer, List<MoveLearnt>> source) {
+        Map<Integer, List<MoveLearnt>> normalized = new HashMap<>();
+        for (Map.Entry<Integer, List<MoveLearnt>> entry : source.entrySet()) {
+            List<MoveLearnt> cleaned = new ArrayList<>();
+            for (MoveLearnt ml : entry.getValue()) {
+                if (ml != null && ml.move > 0) {
+                    cleaned.add(new MoveLearnt(ml));
+                }
+            }
+            normalized.put(entry.getKey(), cleaned);
+        }
+        return normalized;
+    }
+
     public void save() {
         stopEditing();
 
         ManualEditRegistry.getInstance().addEntries("Learnsets", collectLearnsetChangesForLog());
-        romHandler.setMovesLearnt(movesLearnt);
 
-        JOptionPane.showMessageDialog(this,
-                "- Learnsets updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        // Save learnsets back to ROM handler. Build a normalized copy first so no
+        // bogus placeholder entries (move <= 0) ever reach the ROM.
+        romHandler.setMovesLearnt(createNormalizedLearnsets(movesLearnt));
+
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Learnsets updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
         commitChanges();
     }
 
@@ -579,6 +606,22 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         }
     }
 
+    private Species getSelectedSpecies() {
+        if (mainTable == null) {
+            return null;
+        }
+        int viewRow = mainTable.getSelectedRow();
+        if (viewRow < 0) {
+            return null;
+        }
+        int modelRow = mainTable.convertRowIndexToModel(viewRow);
+        int index = modelRow + 1; // model row 0 == pokemonList[1]
+        if (index < 0 || index >= pokemonList.size()) {
+            return null;
+        }
+        return pokemonList.get(index);
+    }
+
     private void addMoveSlot() {
         if (copyPasteModeEnabled) {
             JOptionPane.showMessageDialog(this,
@@ -587,10 +630,35 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        JOptionPane.showMessageDialog(this,
-                "Add Move: select a Pokemon row and edit the next empty Move/Lvl pair.",
-                "Add Move",
-                JOptionPane.INFORMATION_MESSAGE);
+        stopEditing();
+
+        Species species = getSelectedSpecies();
+        if (species == null) {
+            JOptionPane.showMessageDialog(this,
+                    "Select a Pokemon row first, then use Add Move to append an empty slot.",
+                    "Add Move",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        List<MoveLearnt> learnset = movesLearnt.computeIfAbsent(species.getNumber(), k -> new ArrayList<>());
+        // Append an empty placeholder slot (move 0). It is harmless: save() drops
+        // move <= 0 entries, so an empty slot the user never fills is never written.
+        learnset.add(new MoveLearnt(0, 1));
+        // Grow the displayed columns if this species now needs more than the current cap.
+        tableModel.ensureCapacity(learnset.size());
+        refreshTableStructure();
+
+        int viewRow = mainTable.getSelectedRow();
+        if (viewRow >= 0) {
+            int moveCol = (learnset.size() - 1) * 2; // Move column for the new slot
+            EditorUtils.runWithFrozenSyncSuppressed(mainTable, () -> {
+                if (moveCol < mainTable.getColumnCount()) {
+                    mainTable.setColumnSelectionInterval(moveCol, moveCol);
+                    mainTable.scrollRectToVisible(mainTable.getCellRect(viewRow, moveCol, true));
+                }
+            });
+        }
     }
 
     private void removeMoveSlot() {
@@ -601,10 +669,59 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        JOptionPane.showMessageDialog(this,
-                "Remove Move: clear a Move name or set Level to 0 for the selected slot.",
-                "Remove Move",
-                JOptionPane.INFORMATION_MESSAGE);
+        stopEditing();
+
+        Species species = getSelectedSpecies();
+        if (species == null) {
+            JOptionPane.showMessageDialog(this,
+                    "Select a Pokemon row first, then use Remove Move to delete a slot.",
+                    "Remove Move",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        List<MoveLearnt> learnset = movesLearnt.get(species.getNumber());
+        if (learnset == null || learnset.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                    "This Pokemon has no move slots to remove.",
+                    "Remove Move",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
+        // Remove the selected slot (derived from the selected main-table column), or
+        // the last slot when no specific move column is selected.
+        int slot = learnset.size() - 1;
+        int selCol = mainTable.getSelectedColumn();
+        if (selCol >= 0) {
+            int candidate = selCol / 2; // two columns (Move, Lvl) per slot
+            if (candidate < learnset.size()) {
+                slot = candidate;
+            }
+        }
+        learnset.remove(slot);
+
+        refreshTableStructure();
+    }
+
+    /**
+     * Refresh the table after the learnset data or column count changes. The main
+     * table is driven by a wrapper model, so the structure event must be fired on
+     * THAT model (mainTable.getModel()) for JTable to rebuild its columns. After the
+     * rebuild we re-apply the per-column editors/widths and repaint both tables.
+     */
+    private void refreshTableStructure() {
+        if (mainTable != null && mainTable.getModel() instanceof AbstractTableModel) {
+            ((AbstractTableModel) mainTable.getModel()).fireTableStructureChanged();
+        }
+        setupMainTableColumns();
+        TableLayoutDefaults.refreshHeaderPreferredWidth(mainTable);
+        if (frozenTable != null) {
+            frozenTable.repaint();
+        }
+        if (mainTable != null) {
+            mainTable.repaint();
+        }
     }
 
     private void fillAllMoveSlots() {
@@ -745,22 +862,35 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         private final List<Species> pokemonList;
         private final List<Move> moveList;
         private final Map<Integer, List<MoveLearnt>> movesLearnt;
-        private final int maxMoves;
-        private final String[] columnNames;
+        private int maxMoves;
+        private String[] columnNames;
 
         LearnsetsTableModel(List<Species> pokemonList, List<Move> moveList,
                 Map<Integer, List<MoveLearnt>> movesLearnt, int maxMoves) {
             this.pokemonList = pokemonList;
             this.moveList = moveList;
             this.movesLearnt = movesLearnt;
-            this.maxMoves = maxMoves;
+            buildColumns(maxMoves);
+        }
 
+        private void buildColumns(int slots) {
+            this.maxMoves = slots;
             columnNames = new String[2 + maxMoves * 2];
             columnNames[0] = "ID";
             columnNames[1] = "Name";
             for (int i = 0; i < maxMoves; i++) {
                 columnNames[2 + i * 2] = "Move";
                 columnNames[2 + i * 2 + 1] = "Lvl";
+            }
+        }
+
+        /**
+         * Ensure the model shows at least {@code slots} Move/Lvl pairs so a freshly
+         * added slot is visible. Caller must fire a structure change afterward.
+         */
+        void ensureCapacity(int slots) {
+            if (slots > maxMoves) {
+                buildColumns(slots);
             }
         }
 
@@ -841,15 +971,29 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
             List<MoveLearnt> learnset = movesLearnt.computeIfAbsent(pokemon.getNumber(), k -> new ArrayList<>());
             int moveIndex = (columnIndex - 2) / 2;
 
-            while (moveIndex >= learnset.size()) {
-                learnset.add(new MoveLearnt(0, 1));
-            }
-
-            MoveLearnt entry = learnset.get(moveIndex);
             if (columnIndex % 2 == 0) {
-                entry.move = parseMoveValue(value == null ? "" : value.toString());
+                // Move column (EVEN indices). Only create/extend a slot when a real
+                // (>0) move id is being assigned. An empty/blank/0 move (e.g. from a
+                // no-op CSV round-trip) must NOT balloon the learnset with placeholder
+                // entries that save() would then write to the ROM.
+                int moveId = parseMoveValue(value == null ? "" : value.toString());
+                if (moveId <= 0) {
+                    if (moveIndex < learnset.size()) {
+                        learnset.get(moveIndex).move = 0;
+                    }
+                    // else: no existing slot -> nothing to clear, do not create one
+                } else {
+                    while (moveIndex >= learnset.size()) {
+                        learnset.add(new MoveLearnt(0, 1));
+                    }
+                    learnset.get(moveIndex).move = moveId;
+                }
             } else {
-                entry.level = clampLevel(parseInt(value));
+                // Level column (ODD indices). Never create a slot from a level edit;
+                // only update the level when that slot already exists.
+                if (moveIndex < learnset.size()) {
+                    learnset.get(moveIndex).level = clampLevel(parseInt(value));
+                }
             }
 
             fireTableCellUpdated(rowIndex, columnIndex);

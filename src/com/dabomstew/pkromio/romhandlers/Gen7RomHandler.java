@@ -167,7 +167,9 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
             byte[] newRawFile = N3DSTxtHandler.saveEntry(oldRawFile, strings, romEntry.getRomType());
             textGARC.setFile(index, newRawFile);
         } catch (IOException e) {
-            e.printStackTrace();
+            // Surface the failure instead of silently keeping the old text, which would
+            // otherwise let randomization report success with inconsistent ROM text.
+            throw new RomIOException("Failed to repack text GARC entry " + index, e);
         }
     }
 
@@ -985,8 +987,16 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
             moveData[14] = determineCriticalStageByte(moves[i]);
             moveData[15] = (byte) clamp((int) Math.round(moves[i].flinchPercentChance), 0, 255);
             writeWord(moveData, 16, clamp(moves[i].effectIndex, 0, 0xFFFF));
-            moveData[18] = (byte) clampSigned(moves[i].recoilPercent, -128, 127);
-            moveData[19] = (byte) clamp(moves[i].absorbPercent, 0, 255);
+            // Byte 18 is the recoil/absorb byte (see loadMoves' quality-based override):
+            // absorb-quality reads +byte18, others read -byte18. Mirror that here. The old
+            // code sign-flipped recoil on every save; for absorb-quality moves byte19 is left
+            // as-loaded (absorb came from byte18, so writing it to 19 would corrupt that byte).
+            if (moves[i].categoryQuality == Gen7Constants.damageAbsorbQuality) {
+                moveData[18] = (byte) clamp(moves[i].absorbPercent, 0, 255);
+            } else {
+                moveData[18] = (byte) clampSigned(-moves[i].recoilPercent, -128, 127);
+                moveData[19] = (byte) clamp(moves[i].absorbPercent, 0, 255);
+            }
             moveData[20] = (byte) clamp(moves[i].target, 0, 255);
 
             for (int statChange = 0; statChange < 3; statChange++) {
@@ -1381,7 +1391,8 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
             for (int i = 0; i < 3; i++) {
                 int offset = i * 0x14;
                 Item item = items.get(i);
-                FileFunctions.write2ByteInt(giftsFile, offset + 8, item.getId());
+                int id = item == null ? 0 : item.getId(); // id 0 (no held item) round-trips as null
+                FileFunctions.write2ByteInt(giftsFile, offset + 8, id);
             }
             writeGARC(romEntry.getFile("StaticPokemon"), staticGarc);
         } catch (IOException e) {
@@ -2157,6 +2168,14 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
     }
 
     @Override
+    public boolean supportsFormeEggMoves() {
+        // Gen 7's egg-move GARC stores per-forme files (referenced via the leading
+        // forme word), and getEggMoves/setEggMoves above round-trip them keyed by
+        // the forme's own species number, so forme egg-move edits persist.
+        return true;
+    }
+
+    @Override
     public boolean hasStaticAltFormes() {
         return true;
     }
@@ -2630,7 +2649,7 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
     public List<Integer> getTMMoves() {
         String tmDataPrefix = Gen7Constants.getTmDataPrefix(romEntry.getRomType());
         int offset = find(code, tmDataPrefix);
-        if (offset != 0) {
+        if (offset > 0) { // find() returns -1/-2/-3 on failure (never 0); use > 0 like setTMMoves
             offset += tmDataPrefix.length() / 2; // because it was a prefix
             List<Integer> tms = new ArrayList<>();
             for (int i = 0; i < Gen7Constants.tmCount; i++) {
@@ -2814,6 +2833,11 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
     @Override
     public Map<Species, boolean[]> getMoveTutorCompatibility() {
         Map<Species, boolean[]> compat = new TreeMap<>();
+        // SM has no move tutors; its personal-data bytes at bsMTCompatOffset are not a tutor
+        // bitmap. Mirror the setter's guard so we don't return a meaningless compatibility map.
+        if (!hasMoveTutors()) {
+            return compat;
+        }
         int pokemonCount = Gen7Constants.getPokemonCount(romEntry.getRomType());
         int formeCount = Gen7Constants.getFormeCount(romEntry.getRomType());
         for (int i = 1; i <= pokemonCount + formeCount; i++) {
@@ -3584,7 +3608,6 @@ public class Gen7RomHandler extends Abstract3DSRomHandler {
             for (int i = 1; i < itemPriceGarc.files.size(); i++) {
                 prices.add(readWord(itemPriceGarc.files.get(i).get(0), 0) * 10);
             }
-            writeGARC(romEntry.getFile("ItemData"), itemPriceGarc);
         } catch (IOException e) {
             throw new RomIOException(e);
         }

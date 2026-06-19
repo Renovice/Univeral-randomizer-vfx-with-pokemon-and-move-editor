@@ -152,11 +152,11 @@ public abstract class AbstractDSRomHandler extends AbstractRomHandler {
     }
 
     protected static String getROMCodeFromFile(String filename) {
-        try {
-            FileInputStream fis = new FileInputStream(filename);
-            fis.skip(0x0C);
+        try (FileInputStream fis = new FileInputStream(filename)) {
+            // Read-and-discard rather than skip(), whose return value (bytes actually skipped)
+            // is not guaranteed to equal the request; readFullyIntoBuffer consumes exactly N bytes.
+            FileFunctions.readFullyIntoBuffer(fis, 0x0C);
             byte[] sig = FileFunctions.readFullyIntoBuffer(fis, 4);
-            fis.close();
             return new String(sig, StandardCharsets.US_ASCII);
         } catch (IOException e) {
             throw new RomIOException(e);
@@ -164,11 +164,11 @@ public abstract class AbstractDSRomHandler extends AbstractRomHandler {
     }
 
     protected static byte getVersionFromFile(String filename) {
-        try {
-            FileInputStream fis = new FileInputStream(filename);
-            fis.skip(0x1E);
+        try (FileInputStream fis = new FileInputStream(filename)) {
+            // Read-and-discard rather than skip(), whose return value (bytes actually skipped)
+            // is not guaranteed to equal the request; readFullyIntoBuffer consumes exactly N bytes.
+            FileFunctions.readFullyIntoBuffer(fis, 0x1E);
             byte[] version = FileFunctions.readFullyIntoBuffer(fis, 1);
-            fis.close();
             return version[0];
         } catch (IOException e) {
             throw new RomIOException(e);

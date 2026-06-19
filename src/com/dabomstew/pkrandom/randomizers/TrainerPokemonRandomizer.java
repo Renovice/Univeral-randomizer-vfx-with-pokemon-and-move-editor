@@ -140,7 +140,11 @@ public class TrainerPokemonRandomizer extends Randomizer {
             scrambledTrainers.sort((t1, t2) ->
                     Boolean.compare(eliteFourIndices.contains(currentTrainers.indexOf(t2) + 1), eliteFourIndices.contains(currentTrainers.indexOf(t1) + 1)));
             if (rivalCarriesStarter) {
-                List<Species> starterList = romHandler.getStarters().subList(0, 3);
+                // Use the starters actually returned by the handler rather than a hard-coded 3.
+                // Some games (e.g. Pokémon Yellow) have fewer than 3 starters, and subList(0, 3)
+                // would throw IndexOutOfBoundsException there.
+                List<Species> allStarters = romHandler.getStarters();
+                List<Species> starterList = allStarters.subList(0, Math.min(3, allStarters.size()));
                 for (Species starter : starterList) {
                     // If rival/friend carries starter, the starters cannot be set as unique
                     // (Excepting the final evolution, which is done later.)

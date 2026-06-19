@@ -22,13 +22,14 @@ public final class PokemonIconCache {
     private static final int ICON_SIZE = 48;
     private static final String ICON_RESOURCE_ROOT = "/com/dabomstew/pkrandom/pokemon/icons/";
     private static final Set<Integer> DEFAULT_FORM_SPECIES = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(778, 664, 665, 414, 493, 773)));
-    private static final Map<RomHandler, PokemonIconCache> CACHE_BY_HANDLER = new ConcurrentHashMap<>();
+    private static PokemonIconCache current;
 
     private final RomHandler romHandler;
     private final boolean supported;
     private final boolean useBundledIcons;
     private final Map<String, ImageIcon> bundledIconCache = new ConcurrentHashMap<>();
     private final Map<Species, ImageIcon> cache = new ConcurrentHashMap<>();
+    private final Map<String, ImageIcon> scaledCache = new ConcurrentHashMap<>();
 
     private PokemonIconCache(RomHandler romHandler) {
         this.romHandler = romHandler;
@@ -37,11 +38,14 @@ public final class PokemonIconCache {
         this.supported = hasGetter || useBundledIcons;
     }
 
-    public static PokemonIconCache get(RomHandler romHandler) {
+    public static synchronized PokemonIconCache get(RomHandler romHandler) {
         if (romHandler == null) {
             return new PokemonIconCache(null);
         }
-        return CACHE_BY_HANDLER.computeIfAbsent(romHandler, PokemonIconCache::new);
+        if (current == null || current.romHandler != romHandler) {
+            current = new PokemonIconCache(romHandler);
+        }
+        return current;
     }
 
     public boolean hasIcons() {
@@ -53,6 +57,82 @@ public final class PokemonIconCache {
             return null;
         }
         return cache.computeIfAbsent(species, this::createIcon);
+    }
+
+    /**
+     * Crisp icon at an arbitrary size, scaled from the native sprite with
+     * nearest-neighbour interpolation so pixel art stays sharp (no blur).
+     * Use this for large displays like the card view header.
+     */
+    public ImageIcon getScaledIcon(Species species, int size) {
+        if (!supported || species == null || size <= 0) {
+            return null;
+        }
+        String cacheKey = (species.getNumber()) + ":" + (species.getFormeNumber()) + ":" + size;
+        return scaledCache.computeIfAbsent(cacheKey, k -> {
+            BufferedImage source = loadSourceImage(species);
+            if (source == null) {
+                return null;
+            }
+            BufferedImage scaled = scaleNearest(source, size);
+            return scaled == null ? null : new ImageIcon(scaled);
+        });
+    }
+
+    /** Native (unscaled) sprite for a species, or null. */
+    private BufferedImage loadSourceImage(Species species) {
+        if (romHandler != null && romHandler.hasPokemonImageGetter()) {
+            try {
+                return romHandler.createPokemonImageGetter(species)
+                        .setTransparentBackground(true)
+                        .get();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        if (useBundledIcons) {
+            for (String candidate : buildCandidateResourceNames(species)) {
+                BufferedImage image = loadBundledSource(candidate);
+                if (image != null) {
+                    return image;
+                }
+            }
+            return loadBundledSource("unknown");
+        }
+        return null;
+    }
+
+    private BufferedImage loadBundledSource(String name) {
+        if (name == null || name.isEmpty()) {
+            return null;
+        }
+        String resourcePath = ICON_RESOURCE_ROOT + name + ".png";
+        try (InputStream stream = PokemonIconCache.class.getResourceAsStream(resourcePath)) {
+            return stream == null ? null : ImageIO.read(stream);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /** Nearest-neighbour scale to a square of {@code size}, preserving aspect ratio and centering. */
+    private static BufferedImage scaleNearest(BufferedImage image, int size) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+        BufferedImage out = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = out.createGraphics();
+        g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        double scale = Math.min((double) size / width, (double) size / height);
+        int scaledWidth = Math.max(1, (int) Math.round(width * scale));
+        int scaledHeight = Math.max(1, (int) Math.round(height * scale));
+        int x = (size - scaledWidth) / 2;
+        int y = (size - scaledHeight) / 2;
+        g2d.drawImage(image, x, y, scaledWidth, scaledHeight, null);
+        g2d.dispose();
+        return out;
     }
 
     private ImageIcon createIcon(Species species) {

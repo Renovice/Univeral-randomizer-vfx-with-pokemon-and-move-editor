@@ -33,6 +33,9 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
     private boolean copyPasteModeEnabled = false;
     private final EditorUtils.FindState findState = new EditorUtils.FindState();
     private final Map<Species, boolean[]> compatibilityBackup = new HashMap<>();
+    private JPanel tableContainer;
+    // Feature #7: snapshot/revert for the "Edit Tutor Moves..." dialog, which applies immediately.
+    private final EditorUtils.MoveListGuard tutorMovesGuard;
 
     public Gen5MoveTutorsSheetPanel(RomHandler romHandler) {
         this.romHandler = romHandler;
@@ -40,29 +43,61 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
         this.moveList = romHandler.getMoves();
         if (romHandler.hasMoveTutors()) {
             this.tutorMoves = romHandler.getMoveTutorMoves();
-            this.tutorCompatibility = romHandler.getMoveTutorCompatibility();
+            this.tutorCompatibility = EditorDataCache.get(romHandler).getMoveTutorCompatibility();
         } else {
             this.tutorMoves = new ArrayList<>();
             this.tutorCompatibility = new HashMap<>();
         }
         this.iconCache = PokemonIconCache.get(romHandler);
+        this.tutorMovesGuard = new EditorUtils.MoveListGuard(
+                romHandler::getMoveTutorMoves, romHandler::setMoveTutorMoves);
         initializeUI();
         createBackup();
     }
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createStyledToolbar(), BorderLayout.NORTH);
-        add(createFrozenColumnTable(), BorderLayout.CENTER);
+        tableContainer = createFrozenColumnTable();
+        add(tableContainer, BorderLayout.CENTER);
+    }
+
+    /**
+     * Opens the tutor move assignment dialog and, when changes are applied,
+     * rebuilds the compatibility table so the column headers show the new move
+     * names.
+     */
+    private void editTutorMoves() {
+        stopEditing();
+        boolean changed = EditorUtils.editMoveTutorMoves(this, romHandler);
+        if (changed) {
+            tutorMovesGuard.markDirty();
+            rebuildTable();
+        }
+    }
+
+    /**
+     * Rebuilds the table area in place (the compatibility edits live in
+     * {@code tutorCompatibility} and survive the rebuild) so the freshly-built
+     * column headers reflect the current tutor move assignment.
+     */
+    private void rebuildTable() {
+        if (tableContainer != null) {
+            remove(tableContainer);
+        }
+        tableContainer = createFrozenColumnTable();
+        add(tableContainer, BorderLayout.CENTER);
+        revalidate();
+        repaint();
     }
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
@@ -99,11 +134,19 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
         toolbar.add(Box.createHorizontalStrut(10));
         toolbar.add(selectAllButton);
         toolbar.add(clearAllButton);
+
+        // Only offer tutor move reassignment when the ROM actually has editable tutors.
+        if (romHandler.hasMoveTutors() && !tutorMoves.isEmpty()) {
+            JButton editTutorMovesButton = EditorUtils.createStyledButton("Edit Tutor Moves...", new Color(123, 31, 162));
+            editTutorMovesButton.addActionListener(e -> editTutorMoves());
+            toolbar.add(Box.createHorizontalStrut(10));
+            toolbar.add(editTutorMovesButton);
+        }
         toolbar.add(Box.createHorizontalStrut(10));
 
         JLabel infoLabel = new JLabel(String.format("Move Tutor Compatibility - %d tutors", tutorMoves.size()));
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -111,7 +154,7 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new MoveTutorTableModel(pokemonList, moveList, tutorMoves, tutorCompatibility);
 
@@ -205,13 +248,13 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
         EditorUtils.linkVerticalScrollBars(frozenScrollPane, mainScrollPane);
@@ -301,10 +344,14 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
 
         romHandler.setMoveTutorCompatibility(tutorCompatibility);
 
-        JOptionPane.showMessageDialog(this,
-                "- Move tutor compatibility updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Move tutor compatibility updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+        // Feature #7: tutor-move reassignment is now kept; re-baseline its revert snapshot.
+        tutorMovesGuard.commit();
         commitChanges();
     }
 
@@ -317,7 +364,12 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
 
         if (result == JOptionPane.YES_OPTION) {
             stopEditing();
+            // Feature #7: revert an unsaved tutor-move reassignment, then rebuild headers if it changed.
+            boolean reverted = tutorMovesGuard.revertIfDirty();
             restoreFromBackup();
+            if (reverted) {
+                rebuildTable();
+            }
         }
     }
 
@@ -511,6 +563,8 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
 
     public void onWindowClosing() {
         stopEditing();
+        // Feature #7: drop an unsaved tutor-move reassignment (the dialog applied it live).
+        tutorMovesGuard.revertIfDirty();
         restoreFromBackup();
     }
 
@@ -525,13 +579,13 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
             setSelected(value != null && (Boolean) value);
-            Color base = row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR;
+            Color base = row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor();
             if (isSelected) {
                 setBackground(table.getSelectionBackground());
                 setForeground(table.getSelectionForeground());
             } else {
                 setBackground(base);
-                setForeground(Color.BLACK);
+                setForeground(EditorTheme.text());
             }
             return this;
         }
@@ -552,13 +606,13 @@ public class Gen5MoveTutorsSheetPanel extends JPanel {
             if (value instanceof Boolean) {
                 checkBox.setSelected((Boolean) value);
             }
-            Color base = row % 2 == 0 ? TableLayoutDefaults.EVEN_ROW_COLOR : TableLayoutDefaults.ODD_ROW_COLOR;
+            Color base = row % 2 == 0 ? TableLayoutDefaults.evenRowColor() : TableLayoutDefaults.oddRowColor();
             if (isSelected) {
                 checkBox.setBackground(table.getSelectionBackground());
                 checkBox.setForeground(table.getSelectionForeground());
             } else {
                 checkBox.setBackground(base);
-                checkBox.setForeground(Color.BLACK);
+                checkBox.setForeground(EditorTheme.text());
             }
             return checkBox;
         }

@@ -332,6 +332,21 @@ public interface RomHandler {
 
     void setEggMoves(Map<Integer, List<Integer>> eggMoves);
 
+    /**
+     * Whether {@link #getEggMoves()}/{@link #setEggMoves(Map)} store and persist
+     * egg moves for alternate formes (keyed by the forme's own
+     * {@link com.dabomstew.pkromio.gamedata.Species#getNumber() species number}),
+     * as opposed to base species only.
+     * <br>
+     * Most generations store egg moves per base species; editing an alt-forme row
+     * there would be silently discarded at save, so editors should treat such rows
+     * as read-only. Generations whose handler genuinely round-trips per-forme egg
+     * moves (e.g. Gen 7) override this to {@code true}.
+     */
+    default boolean supportsFormeEggMoves() {
+        return false;
+    }
+
     boolean supportsFourStartingMoves();
 
     // ==============
@@ -707,5 +722,16 @@ public interface RomHandler {
     void setTypeTable(TypeTable typeTable);
 
     boolean hasTypeEffectivenessSupport();
+
+    /**
+     * Whether this ROM can persist {@link com.dabomstew.pkromio.gamedata.Effectiveness#ZERO}
+     * (immunity) entries that are added through {@link #setTypeTable(TypeTable)}.
+     * <p>
+     * The Type Effectiveness editor uses this to decide whether to offer "Immune (0x)" as a
+     * selectable value, so it never exposes a silent no-op on a generation that cannot store a
+     * newly-added immunity. Every current handler that reads/writes the table round-trips ZERO,
+     * so the default mirrors {@link #hasTypeEffectivenessSupport()}.
+     */
+    boolean hasTypeImmunityEditSupport();
 
 }

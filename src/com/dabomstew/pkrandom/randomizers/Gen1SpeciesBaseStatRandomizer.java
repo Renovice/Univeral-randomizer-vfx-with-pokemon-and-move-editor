@@ -91,4 +91,40 @@ public class Gen1SpeciesBaseStatRandomizer extends SpeciesBaseStatRandomizer {
         to.setSpeed((int) Math.min(255, Math.max(1, Math.round(from.getSpeed() * bstRatio))));
         to.setSpecial((int) Math.min(255, Math.max(1, Math.round(from.getSpecial() * bstRatio))));
     }
+
+    @Override
+    protected void applyNewBST(Species pk, int newBST, Settings.GateDistribution distribution) {
+        // Gen 1 uses the unified Special stat instead of Sp.Atk/Sp.Def, and BST is the sum
+        // of HP/Atk/Def/Special/Speed. Redistribute onto those 5 stats.
+        int[] baseMins = new int[]{MIN_HP, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT};
+        int[] maxes = new int[]{255, 255, 255, 255, 255};
+        int[] current = new int[]{pk.getHp(), pk.getAttack(), pk.getDefense(), pk.getSpeed(), pk.getSpecial()};
+
+        double[] weights = new double[5];
+        switch (distribution) {
+            case EVEN:
+                for (int i = 0; i < 5; i++) {
+                    weights[i] = 1.0;
+                }
+                break;
+            case RANDOM:
+                for (int i = 0; i < 5; i++) {
+                    weights[i] = random.nextDouble();
+                }
+                break;
+            case PROPORTIONAL:
+            default:
+                for (int i = 0; i < 5; i++) {
+                    weights[i] = Math.max(current[i], 1);
+                }
+                break;
+        }
+
+        int[] stats = distributeStatsWithCaps(newBST, baseMins, maxes, weights);
+        pk.setHp(clampStat(stats[0], MIN_HP, 255));
+        pk.setAttack(clampStat(stats[1], 1, 255));
+        pk.setDefense(clampStat(stats[2], 1, 255));
+        pk.setSpeed(clampStat(stats[3], 1, 255));
+        pk.setSpecial(clampStat(stats[4], 1, 255));
+    }
 }

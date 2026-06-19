@@ -252,6 +252,9 @@ public class NCCH {
 
         // Initialize new ROM
         RandomAccessFile fNew = new RandomAccessFile(filename, "rw");
+        // Opening with "rw" does not truncate; if an existing larger file is being
+        // overwritten, stale trailing bytes would remain after the rebuilt image.
+        fNew.setLength(0);
 
         // Read the header and exheader and write it to the output ROM
         byte[] header = new byte[header_and_exheader_size];
@@ -280,8 +283,7 @@ public class NCCH {
             long newLogoOffset = header_and_exheader_size;
             fNew.seek(newLogoOffset);
             fNew.write(logo);
-            fNew.seek(0x198);
-            fNew.write((int) newLogoOffset / media_unit_size);
+            writeIntLE(fNew, 0x198, (int) newLogoOffset / media_unit_size);
         }
 
         // The plain region is even smaller (1KB) so repeat the same process
@@ -294,8 +296,7 @@ public class NCCH {
             long newPlainOffset = header_and_exheader_size + logoLength;
             fNew.seek(newPlainOffset);
             fNew.write(plain);
-            fNew.seek(0x190);
-            fNew.write((int) newPlainOffset / media_unit_size);
+            writeIntLE(fNew, 0x190, (int) newPlainOffset / media_unit_size);
         }
 
         // Update the SMDH so that Citra displays the seed in the title
@@ -305,19 +306,15 @@ public class NCCH {
         // Now, reconstruct the exefs based on our new version of .code and our new SMDH
         long newExefsOffset = header_and_exheader_size + logoLength + plainLength;
         long newExefsLength = rebuildExefs(fNew, newExefsOffset);
-        fNew.seek(0x1A0);
-        fNew.write((int) newExefsOffset / media_unit_size);
-        fNew.seek(0x1A4);
-        fNew.write((int) newExefsLength / media_unit_size);
+        writeIntLE(fNew, 0x1A0, (int) newExefsOffset / media_unit_size);
+        writeIntLE(fNew, 0x1A4, (int) newExefsLength / media_unit_size);
 
         // Then, reconstruct the romfs
         // TODO: Fix the yet-unsolved alignment issues in rebuildRomfs when you remove this align
         long newRomfsOffset = alignLong(header_and_exheader_size + logoLength + plainLength + newExefsLength, 4096);
         long newRomfsLength = rebuildRomfs(fNew, newRomfsOffset);
-        fNew.seek(0x1B0);
-        fNew.write((int) newRomfsOffset / media_unit_size);
-        fNew.seek(0x1B4);
-        fNew.write((int) newRomfsLength / media_unit_size);
+        writeIntLE(fNew, 0x1B0, (int) newRomfsOffset / media_unit_size);
+        writeIntLE(fNew, 0x1B4, (int) newRomfsLength / media_unit_size);
 
         // Lastly, reconstruct the superblock hashes
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -564,7 +561,9 @@ public class NCCH {
     }
 
     private byte[] updateFileMetadataTable(int fileMetadataTableLength) {
-        fileMetadataList.sort((FileMetadata f1, FileMetadata f2) -> (int) (f1.fileDataOffset - f2.fileDataOffset));
+        // fileDataOffset is a long; casting the difference to int can overflow for large RomFS
+        // images (offsets > Integer.MAX_VALUE apart) and flip the ordering. Use Long.compare.
+        fileMetadataList.sort((FileMetadata f1, FileMetadata f2) -> Long.compare(f1.fileDataOffset, f2.fileDataOffset));
         byte[] fileMetadataTable = new byte[fileMetadataTableLength];
         int currentTableOffset = 0;
         long currentFileDataOffset = 0;
@@ -809,6 +808,16 @@ public class NCCH {
 
     public int getVersion() {
         return version;
+    }
+
+    // Writes a 4-byte little-endian integer at the given file offset. NCCH header
+    // offset/length fields are 4 bytes; RandomAccessFile.write(int) would only write
+    // the low byte, corrupting the header.
+    private static void writeIntLE(RandomAccessFile file, long offset, int value) throws IOException {
+        byte[] valueBytes = new byte[4];
+        FileFunctions.writeFullInt(valueBytes, 0, value);
+        file.seek(offset);
+        file.write(valueBytes);
     }
 
     public static int alignInt(int num, int alignment) {

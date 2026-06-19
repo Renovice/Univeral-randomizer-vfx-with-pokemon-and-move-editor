@@ -69,12 +69,26 @@ public class NARCArchive {
             hasFilenames = true;
             int offset = 8;
             for (int i = 0; i < fileCount; i++) {
+                if (offset >= fntbframe.length) {
+                    throw new IOException("Invalid NARC: filename entry " + i
+                            + " length byte at offset " + offset + " is outside the FNTB frame (length "
+                            + fntbframe.length + ")");
+                }
                 int fnLength = (fntbframe[offset] & 0xFF);
                 offset++;
+                if ((long) offset + fnLength > fntbframe.length) {
+                    throw new IOException("Invalid NARC: filename entry " + i + " (length " + fnLength
+                            + ") at offset " + offset + " is outside the FNTB frame (length "
+                            + fntbframe.length + ")");
+                }
                 byte[] filenameBA = new byte[fnLength];
                 System.arraycopy(fntbframe, offset, filenameBA, 0, fnLength);
                 String filename = new String(filenameBA, StandardCharsets.US_ASCII);
                 filenames.add(filename);
+                // Advance past the filename bytes so the next iteration reads the
+                // following length byte. The writer uses a stride of 1 + name length
+                // (one length byte then the name), so the reader must match it.
+                offset += fnLength;
             }
         } else {
             hasFilenames = false;
@@ -182,6 +196,13 @@ public class NARCArchive {
         int offset = 0x10;
         Map<String, byte[]> frames = new TreeMap<>();
         for (int i = 0; i < frameCount; i++) {
+            // A frame needs at least an 8-byte header (4 magic + 4 size). Validate bounds so a
+            // malformed / misdetected / corrupt archive yields a clean IOException instead of an
+            // ArrayIndexOutOfBoundsException (or NegativeArraySize) deep in the parse.
+            if (offset < 0 || (long) offset + 8 > data.length) {
+                throw new IOException("Invalid NARC: frame " + i + " header at offset " + offset
+                        + " is outside the archive (length " + data.length + ")");
+            }
             byte[] magic = new byte[] { data[offset + 3], data[offset + 2], data[offset + 1], data[offset] };
             String magicS = new String(magic, StandardCharsets.US_ASCII);
 
@@ -190,6 +211,10 @@ public class NARCArchive {
             // the size of their expanded NARCs correctly
             if (i == frameCount - 1 && offset + frame_size < data.length) {
                 frame_size = data.length - offset;
+            }
+            if (frame_size < 8 || (long) offset + frame_size > data.length) {
+                throw new IOException("Invalid NARC: frame " + i + " size " + frame_size
+                        + " at offset " + offset + " is outside the archive (length " + data.length + ")");
             }
             byte[] frame = new byte[frame_size - 8];
             System.arraycopy(data, offset + 8, frame, 0, frame_size - 8);

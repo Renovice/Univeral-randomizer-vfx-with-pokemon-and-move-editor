@@ -84,7 +84,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
     private static final int DEFAULT_BW1_FAIRY_TABLE_OVERLAY = 93;
     private static final int DEFAULT_BW2_FAIRY_TABLE_OFFSET = 0x1740;
     private static final int DEFAULT_BW2_FAIRY_TABLE_OVERLAY = 167;
-    private static final boolean DEBUG_TYPE_TABLE = Boolean.parseBoolean(System.getProperty("upr.debugTypeTable", "true"));
+    private static final boolean DEBUG_TYPE_TABLE = Boolean.parseBoolean(System.getProperty("upr.debugTypeTable", "false"));
     private static final byte[] B2W2_FAIRY_TABLE = new byte[] {
         4, 4, 4, 4, 4, 2, 4, 0, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4,
         8, 4, 2, 2, 4, 8, 2, 0, 8, 4, 4, 4, 4, 2, 8, 4, 8, 2,
@@ -596,7 +596,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             data[2] = Gen5Constants.moveCategoryToByte(move.category);
             data[3] = (byte) clamp(move.power, 0, 255);
 
-            int hitratio = clamp((int) Math.round(move.hitratio), 0, 101);
+            int hitratio = clamp((int) Math.round(move.hitratio), 0, 255);
             data[4] = (byte) hitratio;
             data[5] = (byte) clamp(move.pp, 0, 255);
             data[6] = (byte) clampSigned(move.priority, -128, 127);
@@ -1082,6 +1082,13 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             Encounter enc = new Encounter();
             int species = readWord(data, offset + i * 4) & 0x7FF;
             int forme = readWord(data, offset + i * 4) >> 11;
+            if (species <= 0 || species >= pokes.length || pokes[species] == null) {
+                // Corrupted/hacked encounter data references an invalid species id;
+                // fall back to a valid species rather than throwing.
+                System.out.println("WARNING: Wild encounter references invalid species id " + species
+                        + ". Using fallback id " + SpeciesIDs.bulbasaur + " instead.");
+                species = SpeciesIDs.bulbasaur;
+            }
             Species baseForme = pokes[species];
             if (forme <= baseForme.getCosmeticForms() || forme == 30 || forme == 31) {
                 enc.setSpecies(pokes[species]);
@@ -1249,8 +1256,13 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             int rate = entry[startOffset + i] & 0xFF;
             if (rate != 0) {
                 for (int e = 0; e < amounts[i]; e++) {
-                    Species pkmn = pokes[((entry[startOffset + offset + e * 4] & 0xFF) + ((entry[startOffset + offset
-                            + 1 + e * 4] & 0x03) << 8))];
+                    int speciesIndex = (entry[startOffset + offset + e * 4] & 0xFF)
+                            + ((entry[startOffset + offset + 1 + e * 4] & 0x03) << 8);
+                    if (speciesIndex <= 0 || speciesIndex >= pokes.length || pokes[speciesIndex] == null) {
+                        // Corrupted/hacked encounter data; skip this invalid species reference.
+                        continue;
+                    }
+                    Species pkmn = pokes[speciesIndex];
                     byte[] pokeFile = areaData.get(pkmn.getBaseNumber() - 1);
                     int areaIndex = wildFileToAreaMap[fileNumber];
                     // Route 4?
@@ -1379,6 +1391,8 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
     @Override
     public List<Trainer> getTrainers() {
         List<Trainer> allTrainers = new ArrayList<>();
+        // Clear before repopulating so repeated getTrainers() calls don't accumulate duplicate indices.
+        originalDoubleTrainers.clear();
         try {
             NARCArchive trainers = this.readNARC(romEntry.getFile("TrainerData"));
             NARCArchive trpokes = this.readNARC(romEntry.getFile("TrainerPokemon"));
@@ -1684,6 +1698,13 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
                     }
                     for (int poke = 0; poke < pokemonNum; poke++) {
                         byte[] pkmndata = driftveil.files.get(currentFile);
+                        // PWT slots are a fixed-size array. If the editor shrank this team,
+                        // leave the remaining vanilla slot data intact rather than calling
+                        // next() on an exhausted iterator (which would crash the ROM save).
+                        if (!tpks.hasNext()) {
+                            currentFile++;
+                            continue;
+                        }
                         TrainerPokemon tp = tpks.next();
                         // pokemon and held item
                         writeWord(pkmndata, 0, tp.getSpecies().getNumber());
@@ -2043,9 +2064,14 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
                 for (int oldStatic: specialMusicStaticChanges.keySet()) {
                     int i = newIndexToMusicPoolOffset;
                     int index = readWord(arm9, i);
-                    while (index != oldStatic || replaced.contains(i)) {
+                    while ((index != oldStatic || replaced.contains(i)) && i + 4 <= arm9.length - 2) {
                         i += 4;
                         index = readWord(arm9, i);
+                    }
+                    if (index != oldStatic || replaced.contains(i)) {
+                        // Value not present in the index-to-music pool (corrupted/modified ARM9
+                        // or config/ROM mismatch); skip rather than read off the end of the array.
+                        continue;
                     }
                     writeWord(arm9, i, specialMusicStaticChanges.get(oldStatic));
                     replaced.add(i);
@@ -2056,9 +2082,14 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
                 for (int oldStatic: specialMusicStaticChanges.keySet()) {
                     int i = newIndexToMusicPoolOffset;
                     int index = readWord(arm9, i);
-                    while (index != oldStatic || replaced.contains(i)) {
+                    while ((index != oldStatic || replaced.contains(i)) && i + 4 <= arm9.length - 2) {
                         i += 4;
                         index = readWord(arm9, i);
+                    }
+                    if (index != oldStatic || replaced.contains(i)) {
+                        // Value not present in the index-to-music pool (corrupted/modified ARM9
+                        // or config/ROM mismatch); skip rather than read off the end of the array.
+                        continue;
                     }
                     // Special Kyurem-B/W handling
                     if (index > Gen5Constants.pokemonCount) {
@@ -3777,6 +3808,8 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
         int amount = Gen5Constants.bw2MoveTutorCount;
         int bytesPer = Gen5Constants.bw2MoveTutorBytesPerEntry;
         if (moves.size() != amount) {
+            System.out.println("WARNING: setMoveTutorMoves expected " + amount + " moves but received "
+                    + moves.size() + "; move tutor moves were not changed.");
             return;
         }
         try {
@@ -4442,7 +4475,8 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
                 break;
             }
             offset += 4;
-            if (skipTableOffset < skipTable.length && (skipTableH[skipTableOffset] == (offset / 4) - 1)) {
+            // Guard with the HIDDEN skip table's length, since skipTableH is what is indexed here.
+            if (skipTableOffset < skipTableH.length && (skipTableH[skipTableOffset] == (offset / 4) - 1)) {
                 skipTableOffset++;
                 continue;
             }
@@ -4511,7 +4545,8 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             if (offsetInFile > hitemScripts.length) {
                 break;
             }
-            if (skipTableOffset < skipTable.length && (skipTableH[skipTableOffset] == (offset / 4) - 1)) {
+            // Guard with the HIDDEN skip table's length, since skipTableH is what is indexed here.
+            if (skipTableOffset < skipTableH.length && (skipTableH[skipTableOffset] == (offset / 4) - 1)) {
                 skipTableOffset++;
                 continue;
             }
@@ -4944,7 +4979,6 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             for (int i = 1; i < itemPriceNarc.files.size(); i++) {
                 prices.add(readWord(itemPriceNarc.files.get(i), 0) * 10);
             }
-            writeNARC(romEntry.getFile("ItemData"), itemPriceNarc);
         } catch (IOException e) {
             throw new RomIOException(e);
         }

@@ -177,9 +177,14 @@ public abstract class AbstractGBCRomHandler extends AbstractGBRomHandler {
 
     protected int lengthOfStringAt(int offset, boolean textEngineMode) {
         int len = 0;
-        while (rom[offset + len] != GBConstants.stringTerminator
+        while (offset + len < rom.length
+                && rom[offset + len] != GBConstants.stringTerminator
                 && (!textEngineMode || (rom[offset + len] != GBConstants.stringPrintedTextEnd && rom[offset + len] != GBConstants.stringPrintedTextPromptEnd))) {
             len++;
+        }
+        if (offset + len >= rom.length) {
+            throw new RomIOException("Reached end of ROM while looking for string terminator at offset 0x"
+                    + Integer.toHexString(offset) + ".");
         }
 
         if (textEngineMode
@@ -194,7 +199,7 @@ public abstract class AbstractGBCRomHandler extends AbstractGBRomHandler {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         while (!text.isEmpty()) {
             int i = Math.max(0, longestTableToken - text.length());
-            if (text.charAt(0) == '\\' && text.charAt(1) == 'x') {
+            if (isHexEscape(text)) {
                 baos.write(Integer.parseInt(text.substring(2, 4), 16));
                 text = text.substring(4);
             } else {
@@ -210,6 +215,23 @@ public abstract class AbstractGBCRomHandler extends AbstractGBRomHandler {
             }
         }
         return baos.toByteArray();
+    }
+
+    /**
+     * Returns true if text begins with a well-formed "\xHH" hex escape (a backslash, an 'x',
+     * and two hex digits). A lone or malformed backslash returns false so it is handled by the
+     * normal table lookup instead of throwing.
+     */
+    private static boolean isHexEscape(String text) {
+        return text.length() >= 4
+                && text.charAt(0) == '\\'
+                && text.charAt(1) == 'x'
+                && isHexDigit(text.charAt(2))
+                && isHexDigit(text.charAt(3));
+    }
+
+    private static boolean isHexDigit(char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
     }
 
     protected String readFixedLengthString(int offset, int length) {

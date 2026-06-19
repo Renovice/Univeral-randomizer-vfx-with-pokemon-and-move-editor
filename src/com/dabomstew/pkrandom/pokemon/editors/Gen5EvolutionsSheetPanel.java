@@ -54,7 +54,7 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
 
     private void initializeUI() {
         setLayout(new BorderLayout());
-        setBackground(Color.WHITE);
+        setBackground(EditorTheme.surface());
 
         add(createStyledToolbar(), BorderLayout.NORTH);
         JPanel tablePanel = createFrozenColumnTable();
@@ -63,9 +63,9 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
 
     private JPanel createStyledToolbar() {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
-        toolbar.setBackground(new Color(250, 250, 250));
+        toolbar.setBackground(EditorTheme.toolbar());
         toolbar.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+                BorderFactory.createMatteBorder(0, 0, 1, 0, EditorTheme.border()),
                 new EmptyBorder(5, 5, 5, 5)));
 
         JButton saveButton = EditorUtils.createStyledButton("Save", new Color(76, 175, 80));
@@ -97,7 +97,7 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
 
         JLabel infoLabel = new JLabel("Evolution Methods - Edit how Pokemon evolve");
         infoLabel.setFont(new Font("Segoe UI", Font.PLAIN, 12));
-        infoLabel.setForeground(new Color(100, 100, 100));
+        infoLabel.setForeground(EditorTheme.mutedText());
         toolbar.add(infoLabel);
 
         return toolbar;
@@ -105,9 +105,24 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
 
     private JPanel createFrozenColumnTable() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBackground(Color.WHITE);
+        panel.setBackground(EditorTheme.surface());
 
         tableModel = new EvolutionsTableModel(pokemonList, moveList, itemList, maxEvolutions, romHandler);
+        // Keep Species.evolutionsTo in sync after every edit and on restore (fireTableDataChanged).
+        tableModel.addTableModelListener(e -> {
+            // On a full-table refresh (CSV import / restore via fireTableDataChanged),
+            // strip phantom EvolutionType.NONE entries before rebuilding the reverse
+            // links so a no-op round-trip never leaves NONE slots behind. Single-cell
+            // edits are NOT stripped here: editing the "Evolves To" column deliberately
+            // creates a NONE-typed slot that the user fills in with a Method next.
+            if (e == null || e.getFirstRow() == javax.swing.event.TableModelEvent.HEADER_ROW
+                    || e.getType() == javax.swing.event.TableModelEvent.UPDATE
+                            && e.getFirstRow() == 0
+                            && e.getLastRow() == Integer.MAX_VALUE) {
+                EditorUtils.stripNoneEvolutions(romHandler.getSpeciesInclFormes());
+            }
+            EditorUtils.rebuildEvolutionReverseLinks(romHandler.getSpeciesInclFormes());
+        });
 
         // Frozen table
         TableModel frozenModel = new AbstractTableModel() {
@@ -296,16 +311,16 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
         JScrollPane frozenScrollPane = new JScrollPane(frozenTable);
         frozenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         frozenScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(200, 200, 200)));
+        frozenScrollPane.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, EditorTheme.border()));
         frozenScrollPane.setColumnHeaderView(frozenTable.getTableHeader());
-        frozenScrollPane.getViewport().setBackground(Color.WHITE);
+        frozenScrollPane.getViewport().setBackground(EditorTheme.surface());
 
         JScrollPane mainScrollPane = new JScrollPane(mainTable);
         mainScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         mainScrollPane.setColumnHeaderView(mainTable.getTableHeader());
         mainScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        mainScrollPane.getViewport().setBackground(Color.WHITE);
+        mainScrollPane.getViewport().setBackground(EditorTheme.surface());
         EditorUtils.installHeaderViewportSync(mainScrollPane);
         EditorUtils.linkVerticalScrollBars(frozenScrollPane, mainScrollPane);
 
@@ -433,7 +448,7 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
         }
 
         try {
-            int applied = EditorUtils.applyCsvDataToTable(csvData.getRows(), tableModel, true);
+            int applied = EditorUtils.applyCsvDataToTable(csvData.getRows(), tableModel, true, this);
             tableModel.fireTableDataChanged();
             if (frozenTable != null) {
                 frozenTable.repaint();
@@ -485,12 +500,18 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
 
     public void save() {
         stopEditing();
+        // Drop any phantom EvolutionType.NONE evolutions before they persist, then
+        // rebuild the reverse links so they are consistent with the cleaned data.
+        EditorUtils.stripNoneEvolutions(romHandler.getSpeciesInclFormes());
+        EditorUtils.rebuildEvolutionReverseLinks(romHandler.getSpeciesInclFormes());
         ManualEditRegistry.getInstance().addEntries("Evolutions", collectEvolutionChangesForLog());
 
-        JOptionPane.showMessageDialog(this,
-                "- Evolutions updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
-                "Save Complete",
-                JOptionPane.INFORMATION_MESSAGE);
+        if (!EditorUtils.suppressSaveDialogs) {
+            JOptionPane.showMessageDialog(this,
+                    "- Evolutions updated successfully!\n\nChanges will be saved when you save/randomize the ROM.",
+                    "Save Complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
         commitChanges();
     }
 
@@ -991,15 +1012,16 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
                             evo.setTo(pokemonList.get(speciesNum));
                         }
                     }
-                } else {
-                    // For Method and Parameter columns, ensure evolution slot exists
+                } else if (mod == 1) {
+                    // Method column - legitimately creates a slot (the user is defining
+                    // a new evolution here). Ensure the slot exists.
                     while (evoIndex >= evos.size()) {
                         evos.add(new Evolution(pokemon, pokemon, EvolutionType.NONE, 0));
                     }
 
                     Evolution evo = evos.get(evoIndex);
 
-                    if (mod == 1) {
+                    {
                         // Method - parse using PokEditor exact names
                         String valStr = value.toString();
                         EvolutionType type = parseMethodDescription(valStr);
@@ -1013,7 +1035,16 @@ public class Gen5EvolutionsSheetPanel extends JPanel {
                             fireTableRowsUpdated(row, row);
                             return;
                         }
-                    } else {
+                    }
+                } else {
+                    // Parameter column - NEVER create an evolution slot. A parameter
+                    // edit on a non-existent evolution (e.g. a no-op CSV round-trip)
+                    // must not spawn a phantom EvolutionType.NONE entry.
+                    if (evoIndex >= evos.size()) {
+                        return;
+                    }
+                    Evolution evo = evos.get(evoIndex);
+                    {
                         // Parameter
                         EvolutionType type = evo.getType();
                         if (type != null) {

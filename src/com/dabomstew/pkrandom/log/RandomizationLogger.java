@@ -128,6 +128,26 @@ public class RandomizationLogger {
         logOptionalSections();
         logStatistics(startTime);
         logDiagnostics();
+        logManualEdits();
+    }
+
+    /**
+     * Appends a "Manual Edits" section listing everything changed by hand in the
+     * in-app editor (Card View, the data sheets, the Trainer editor and the Level
+     * Curve tool). The data lives in the process-wide {@link ManualEditRegistry},
+     * which is only cleared when a different ROM is opened, so edits made before
+     * randomizing are still present when this log is produced. The section is
+     * omitted entirely when nothing was edited, keeping the log clean.
+     */
+    private void logManualEdits() {
+        Map<String, List<String>> edits = ManualEditRegistry.getInstance().snapshot();
+        if (edits == null || edits.isEmpty()) {
+            return;
+        }
+        printSectionSeparator();
+        log.println("--- Manual Edits (made in the in-app editor) ---");
+        log.println();
+        log.print(ManualEditLogFormatter.buildLogText(edits));
     }
 
     private void printSectionTitle(String bundleSectionID) {
@@ -256,8 +276,8 @@ public class RandomizationLogger {
                 romHandler.abilitiesPerSpecies() != 0);
         logOverviewLine(getBS("GUI.pePanel.title"), evoRandomizer.isChangesMade()
                 || shouldLogEvolutionImprovements(), true);
-        logOverviewLine(getBS("GUI.spPanel.title"), starterRandomizer.isChangesMade(), true);
-        logOverviewLine(getBS("GUI.stpPanel.title"), staticPokeRandomizer.isStaticChangesMade(),
+        logOverviewLine(getBS("GUI.spPanel.title"), shouldLogStarters(), true);
+        logOverviewLine(getBS("GUI.stpPanel.title"), shouldLogStaticPokemon(),
                 romHandler.canChangeStaticPokemon());
         logOverviewLine(getBS("GUI.igtPanel.title"), tradeRandomizer.isChangesMade(), true);
         logOverviewLine(getBS("GUI.mdPanel.title"),
@@ -660,7 +680,12 @@ public class RandomizationLogger {
     }
 
     private boolean shouldLogStarters() {
-        return starterRandomizer.isChangesMade();
+        // The fully-custom starters fast path in StarterRandomizer.randomizeStarters() writes the
+        // starters but returns before setting its changesMade flag, so isChangesMade() can be false
+        // even though the ROM was changed. CUSTOM mode always performs a starter write, so treat it
+        // as changed here for logging purposes.
+        return starterRandomizer.isChangesMade()
+                || settings.getStartersMod() == Settings.StartersMod.CUSTOM;
     }
 
     private void logStarters() {
@@ -1044,7 +1069,14 @@ public class RandomizationLogger {
     }
 
     private boolean shouldLogStaticPokemon() {
-        return romHandler.canChangeStaticPokemon() && staticPokeRandomizer.isStaticChangesMade();
+        // StaticPokemonRandomizer.onlyChangeStaticLevels() writes changed static levels but never sets
+        // its changesMade flag, so isStaticChangesMade() can be false even though statics were changed.
+        // The static level-only path runs when static species are UNCHANGED but levels are modified;
+        // treat that as a loggable change so the section/overview reflect the saved edit.
+        boolean staticLevelOnly = settings.getStaticPokemonMod() == Settings.StaticPokemonMod.UNCHANGED
+                && settings.isStaticLevelModified();
+        return romHandler.canChangeStaticPokemon()
+                && (staticPokeRandomizer.isStaticChangesMade() || staticLevelOnly);
     }
 
     private void logStaticPokemon(List<StaticEncounter> oldStatics) {

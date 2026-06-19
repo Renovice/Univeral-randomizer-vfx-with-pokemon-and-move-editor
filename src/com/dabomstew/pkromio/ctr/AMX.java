@@ -59,18 +59,29 @@ public class AMX {
 
     public AMX(byte[] data, int scriptNum) throws IOException {
         int found = 0;
-        for (int i = 0; i < data.length - 3; i++) {
+        boolean foundScript = false;
+        // The 4 bytes before the magic hold the script length, so the magic can't
+        // legitimately appear before offset 4. Start the scan at 4 to avoid a
+        // negative index, and stop where a full int can still be read.
+        for (int i = 4; i <= data.length - 4; i++) {
             int val = FileFunctions.readFullInt(data,i);
             if (val == amxMagic) {
                 if (found == scriptNum) {
                     int length = FileFunctions.readFullInt(data,i-4);
+                    if (length <= 0 || i - 4 + (long) length > data.length) {
+                        throw new IOException("Invalid AMX script length " + length + " at offset " + (i - 4));
+                    }
                     readHeaderAndDecompress(Arrays.copyOfRange(data,i-4,i-4+length));
                     scriptOffset = i-4;
+                    foundScript = true;
                     break;
                 } else {
                     found++;
                 }
             }
+        }
+        if (!foundScript) {
+            throw new IOException("Could not find AMX script number " + scriptNum);
         }
     }
 
@@ -80,6 +91,9 @@ public class AMX {
 
     // Credit to the creators of pk3DS (Kaphotics et al)
     private void readHeaderAndDecompress(byte[] encData) throws IOException {
+        if (encData.length < 0x1C) {
+            throw new IOException("AMX script too small to contain a header");
+        }
         length = FileFunctions.readFullInt(encData,0);
         int magic = FileFunctions.readFullInt(encData,4);
         if (magic != amxMagic) {
@@ -93,6 +107,12 @@ public class AMX {
         scriptMovementStart = FileFunctions.readFullInt(encData,0x10);
         finalOffset = FileFunctions.readFullInt(encData,0x14);
         allocatedMemory = FileFunctions.readFullInt(encData,0x18);
+
+        if (scriptInstrStart < 0x1C || length < scriptInstrStart || length > encData.length
+                || finalOffset < scriptInstrStart) {
+            throw new IOException("Invalid AMX header: instrStart=" + scriptInstrStart
+                    + ", length=" + length + ", finalOffset=" + finalOffset + ", dataLength=" + encData.length);
+        }
 
         compLength = length - scriptInstrStart;
         byte[] compressedBytes = Arrays.copyOfRange(encData,scriptInstrStart,length);

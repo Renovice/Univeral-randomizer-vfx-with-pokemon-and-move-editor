@@ -15,7 +15,9 @@ REM === Priority 2: Search common Java 8 installation locations ===
 echo Searching for Java 8 installation...
 
 REM Check Program Files
-FOR /D %%G IN ("C:\Program Files\Java\jdk1.8*", "C:\Program Files\Java\jre1.8*") DO (
+REM Prefer update builds (jdk1.8.0_xxx / jre1.8.0_xxx) over a bare "jdk1.8.0":
+REM ancient GA builds lack the CA certificates needed for the update check.
+FOR /D %%G IN ("C:\Program Files\Java\jdk1.8.0_*", "C:\Program Files\Java\jre1.8.0_*", "C:\Program Files\Java\jdk1.8*", "C:\Program Files\Java\jre1.8*") DO (
     IF EXIST "%%G\bin\java.exe" (
         SET "JAVA_CMD=%%G\bin\java.exe"
         echo Found Java 8 at: %%G
@@ -24,7 +26,7 @@ FOR /D %%G IN ("C:\Program Files\Java\jdk1.8*", "C:\Program Files\Java\jre1.8*")
 )
 
 REM Check Program Files (x86)
-FOR /D %%G IN ("C:\Program Files (x86)\Java\jdk1.8*", "C:\Program Files (x86)\Java\jre1.8*") DO (
+FOR /D %%G IN ("C:\Program Files (x86)\Java\jdk1.8.0_*", "C:\Program Files (x86)\Java\jre1.8.0_*", "C:\Program Files (x86)\Java\jdk1.8*", "C:\Program Files (x86)\Java\jre1.8*") DO (
     IF EXIST "%%G\bin\java.exe" (
         SET "JAVA_CMD=%%G\bin\java.exe"
         echo Found Java 8 at: %%G

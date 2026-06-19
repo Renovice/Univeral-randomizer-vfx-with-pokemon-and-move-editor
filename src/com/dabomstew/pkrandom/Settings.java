@@ -63,7 +63,30 @@ public class Settings {
     private boolean changeNamesToTypes;
 
     public enum BaseStatisticsMod {
-        UNCHANGED, SHUFFLE, RANDOM,
+        // IMPORTANT: do NOT reorder UNCHANGED/SHUFFLE/RANDOM; restoreEnum maps bit
+        // positions to ordinals 0/1/2. GATED is appended at the end for back-compat.
+        UNCHANGED, SHUFFLE, RANDOM, GATED,
+    }
+
+    // Sub-options for BaseStatisticsMod.GATED ("Buff / gate base stats")
+    public enum GateDirection {
+        BUFF_BELOW, NERF_ABOVE, BOTH
+    }
+
+    public enum GateAmountStyle {
+        FIXED, RANDOM
+    }
+
+    public enum GateDistribution {
+        PROPORTIONAL, EVEN, RANDOM
+    }
+
+    public enum GateCeiling {
+        ALLOW_CROSS, CAP_AT_THRESHOLD
+    }
+
+    public enum GateEvoHandling {
+        PER_STAGE, WHOLE_LINE, KEEP_BELOW_EVO
     }
 
     public enum ExpCurveMod {
@@ -71,6 +94,13 @@ public class Settings {
     }
 
     private BaseStatisticsMod baseStatisticsMod = BaseStatisticsMod.UNCHANGED;
+    private GateDirection gateDirection = GateDirection.BUFF_BELOW;
+    private GateAmountStyle gateAmountStyle = GateAmountStyle.FIXED;
+    private GateDistribution gateDistribution = GateDistribution.PROPORTIONAL;
+    private GateCeiling gateCeiling = GateCeiling.ALLOW_CROSS;
+    private GateEvoHandling gateEvoHandling = GateEvoHandling.PER_STAGE;
+    private int gateThreshold = 400;
+    private int gateAmount = 20;
     private boolean baseStatsFollowEvolutions;
     private boolean baseStatsFollowMegaEvolutions;
     private boolean assignEvoStatsRandomly;
@@ -420,8 +450,11 @@ public class Settings {
                 randomizeTrainerClassNames, makeEvolutionsEasier, removeTimeBasedEvolutions));
 
         // 1: pokemon base stats & abilities
+        // NB: GATED also sets the UNCHANGED bit so older readers / restoreEnum fall back
+        // to UNCHANGED; the real GATED flag lives in the appended gate block below.
         out.write(makeByteSelected(baseStatsFollowEvolutions, baseStatisticsMod == BaseStatisticsMod.RANDOM,
-                baseStatisticsMod == BaseStatisticsMod.SHUFFLE, baseStatisticsMod == BaseStatisticsMod.UNCHANGED,
+                baseStatisticsMod == BaseStatisticsMod.SHUFFLE,
+                baseStatisticsMod == BaseStatisticsMod.UNCHANGED || baseStatisticsMod == BaseStatisticsMod.GATED,
                 standardizeEXPCurves, updateBaseStats, baseStatsFollowMegaEvolutions, assignEvoStatsRandomly));
 
         // 2: pokemon types & more general options
@@ -728,6 +761,26 @@ public class Settings {
         } catch (IOException e) {
             out.write(0);
         }
+
+        // Appended gate block (5 bytes) for BaseStatisticsMod.GATED. Placed after the
+        // romName block and before the CRC region so it is covered by the checksum.
+        // Older readers ignore these bytes; shorter/older presets simply lack them.
+        // [0] flags: bit0 gateEnabled, bits1-2 direction, bits3-4 distribution,
+        //            bit5 amountRandom, bit6 ceilingCap
+        // [1] evoHandling ordinal (0/1/2)
+        // [2] threshold hi byte
+        // [3] threshold lo byte
+        // [4] amount (0-255)
+        int gateFlags = (baseStatisticsMod == BaseStatisticsMod.GATED ? 0x01 : 0)
+                | ((gateDirection.ordinal() & 0x03) << 1)
+                | ((gateDistribution.ordinal() & 0x03) << 3)
+                | (gateAmountStyle == GateAmountStyle.RANDOM ? 0x20 : 0)
+                | (gateCeiling == GateCeiling.CAP_AT_THRESHOLD ? 0x40 : 0);
+        out.write(gateFlags & 0xFF);
+        out.write(gateEvoHandling.ordinal() & 0xFF);
+        out.write((gateThreshold >> 8) & 0xFF);
+        out.write(gateThreshold & 0xFF);
+        out.write(gateAmount & 0xFF);
 
         byte[] current = out.toByteArray();
         CRC32 checksum = new CRC32();
@@ -1082,7 +1135,38 @@ public class Settings {
         String romName = new String(data, LENGTH_OF_SETTINGS_DATA + 1, romNameLength, StandardCharsets.US_ASCII);
         settings.setRomName(romName);
 
+        // Appended gate block (5 bytes), located just past the romName block and before
+        // the 8-byte CRC trailer. Older/shorter presets won't have it -> keep defaults.
+        int gateIdx = LENGTH_OF_SETTINGS_DATA + 1 + romNameLength;
+        if (gateIdx + 5 <= data.length - 8) {
+            int gateFlags = data[gateIdx] & 0xFF;
+            int evoHandling = data[gateIdx + 1] & 0xFF;
+            int thresholdHi = data[gateIdx + 2] & 0xFF;
+            int thresholdLo = data[gateIdx + 3] & 0xFF;
+            int amount = data[gateIdx + 4] & 0xFF;
+
+            settings.setGateDirection(enumByOrdinal(GateDirection.class, (gateFlags >> 1) & 0x03));
+            settings.setGateDistribution(enumByOrdinal(GateDistribution.class, (gateFlags >> 3) & 0x03));
+            settings.setGateAmountStyle((gateFlags & 0x20) != 0 ? GateAmountStyle.RANDOM : GateAmountStyle.FIXED);
+            settings.setGateCeiling((gateFlags & 0x40) != 0 ? GateCeiling.CAP_AT_THRESHOLD : GateCeiling.ALLOW_CROSS);
+            settings.setGateEvoHandling(enumByOrdinal(GateEvoHandling.class, evoHandling));
+            settings.setGateThreshold((thresholdHi << 8) | thresholdLo);
+            settings.setGateAmount(amount);
+
+            if ((gateFlags & 0x01) != 0) {
+                settings.setBaseStatisticsMod(BaseStatisticsMod.GATED);
+            }
+        }
+
         return settings;
+    }
+
+    private static <E extends Enum<E>> E enumByOrdinal(Class<E> clazz, int ordinal) {
+        E[] values = clazz.getEnumConstants();
+        if (ordinal < 0 || ordinal >= values.length) {
+            return values[0];
+        }
+        return values[ordinal];
     }
 
     public static class TweakForROMFeedback {
@@ -1127,8 +1211,17 @@ public class Settings {
             romSpecies = rh.getSpecies();
         }
         List<Species> romStarters = rh.getStarters();
-        for (int starter = 0; starter < 3; starter++) {
-            if (this.customStarters[starter] < 0 || this.customStarters[starter] >= romSpecies.size()) {
+        int starterCount = rh.starterCount();
+        for (int starter = 0; starter < this.customStarters.length; starter++) {
+            if (starter >= starterCount) {
+                // This game has fewer starters than custom starter slots (e.g. Yellow has 2).
+                // The matching combo box is never populated for this slot, so its only valid
+                // index is 0 ("Random"). Force it there to avoid a crash on GUI restore.
+                if (this.customStarters[starter] != 0) {
+                    this.customStarters[starter] = 0;
+                    feedback.setChangedStarter(true);
+                }
+            } else if (this.customStarters[starter] < 0 || this.customStarters[starter] >= romSpecies.size()) {
                 // invalid starter for this game
                 feedback.setChangedStarter(true);
                 if (starter >= romStarters.size()) {
@@ -1376,6 +1469,62 @@ public class Settings {
 
     public void setBaseStatisticsMod(BaseStatisticsMod baseStatisticsMod) {
         this.baseStatisticsMod = baseStatisticsMod;
+    }
+
+    public GateDirection getGateDirection() {
+        return gateDirection;
+    }
+
+    public void setGateDirection(GateDirection gateDirection) {
+        this.gateDirection = gateDirection;
+    }
+
+    public GateAmountStyle getGateAmountStyle() {
+        return gateAmountStyle;
+    }
+
+    public void setGateAmountStyle(GateAmountStyle gateAmountStyle) {
+        this.gateAmountStyle = gateAmountStyle;
+    }
+
+    public GateDistribution getGateDistribution() {
+        return gateDistribution;
+    }
+
+    public void setGateDistribution(GateDistribution gateDistribution) {
+        this.gateDistribution = gateDistribution;
+    }
+
+    public GateCeiling getGateCeiling() {
+        return gateCeiling;
+    }
+
+    public void setGateCeiling(GateCeiling gateCeiling) {
+        this.gateCeiling = gateCeiling;
+    }
+
+    public GateEvoHandling getGateEvoHandling() {
+        return gateEvoHandling;
+    }
+
+    public void setGateEvoHandling(GateEvoHandling gateEvoHandling) {
+        this.gateEvoHandling = gateEvoHandling;
+    }
+
+    public int getGateThreshold() {
+        return gateThreshold;
+    }
+
+    public void setGateThreshold(int gateThreshold) {
+        this.gateThreshold = gateThreshold;
+    }
+
+    public int getGateAmount() {
+        return gateAmount;
+    }
+
+    public void setGateAmount(int gateAmount) {
+        this.gateAmount = gateAmount;
     }
 
     public boolean isBaseStatsFollowEvolutions() {

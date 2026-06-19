@@ -19,6 +19,7 @@ public class WildEncounterRandomizer extends Randomizer {
 
         if(!settings.isRandomizeWildPokemon()) {
             modifyLevelsOnly(useTimeOfDay, levelModifier);
+            changesMade = true;
             return;
         }
 
@@ -392,7 +393,7 @@ public class WildEncounterRandomizer extends Randomizer {
             }
 
             if (area.isForceMultipleSpecies()) {
-                enforceMultipleSpecies(area);
+                enforceMultipleSpecies(area, zoneType);
             }
         }
 
@@ -866,14 +867,38 @@ public class WildEncounterRandomizer extends Randomizer {
             }
         }
 
-        private void enforceMultipleSpecies(EncounterArea area) {
+        private void enforceMultipleSpecies(EncounterArea area, Type zoneType) {
             // If an area with forceMultipleSpecies yet has a single species,
-            // just randomly pick a different species for one of the Encounters.
+            // pick a different species for one of the Encounters.
             // This is very unlikely to happen in practice, even with very
-            // restrictive settings, so it should be okay to break logic here.
-            while (area.stream().distinct().count() == 1) {
-                area.get(0).setSpecies(rSpecService.randomSpecies(random));
+            // restrictive settings.
+            // Choose the replacement from the same filtered pool used for normal
+            // replacement (which respects no-legendaries, area bans, type themes,
+            // evolution-stage rules, etc.) so the duplicate-breaker can't introduce
+            // a species the user excluded. If no legal second species exists, leave
+            // the area unchanged rather than looping forever.
+            if (area.isEmpty() || area.stream().distinct().count() != 1) {
+                return;
             }
+
+            Encounter toReplace = area.get(0);
+            Species present = toReplace.getSpecies();
+
+            SpeciesSet pool = new SpeciesSet(setupAllowedForReplacement(present, area, zoneType));
+            pool.remove(present);
+            if (pool.isEmpty()) {
+                // No legal alternative species; leave the area as-is.
+                return;
+            }
+
+            Species replacement = pickReplacement(present, pool);
+            // pickReplacement may return the original species (e.g. catch-em-all keeps banned
+            // species as-is); in that case there is no legal alternative, so leave it unchanged.
+            if (replacement == present) {
+                return;
+            }
+            toReplace.setSpecies(replacement);
+            setFormeForEncounter(toReplace, replacement);
         }
 
         /**

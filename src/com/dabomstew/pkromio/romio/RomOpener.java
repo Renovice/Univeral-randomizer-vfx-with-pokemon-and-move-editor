@@ -153,7 +153,7 @@ public class RomOpener {
                 return FailType.INVALID_RAR_FILE;
             }
             if (sig[0] == 'P' && sig[1] == 'A' && sig[2] == 'T' && sig[3] == 'C' && sig[4] == 'H') {
-                return FailType.INVALID_ZIP_FILE;
+                return FailType.INVALID_IPS_FILE;
             }
         } catch (IOException ex) {
             return FailType.UNREADABLE;

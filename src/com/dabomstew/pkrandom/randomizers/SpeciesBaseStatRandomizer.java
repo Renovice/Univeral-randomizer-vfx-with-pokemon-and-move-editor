@@ -2,6 +2,7 @@ package com.dabomstew.pkrandom.randomizers;
 
 import com.dabomstew.pkrandom.Settings;
 import com.dabomstew.pkromio.constants.SpeciesIDs;
+import com.dabomstew.pkromio.gamedata.Evolution;
 import com.dabomstew.pkromio.gamedata.ExpCurve;
 import com.dabomstew.pkromio.gamedata.MegaEvolution;
 import com.dabomstew.pkromio.gamedata.Species;
@@ -115,6 +116,259 @@ public class SpeciesBaseStatRandomizer extends Randomizer {
             }
         }
         changesMade = true;
+    }
+
+    // ------------------------------------------------------------------
+    // "Buff / gate base stats" (BaseStatisticsMod.GATED)
+    // ------------------------------------------------------------------
+
+    public void gateSpeciesStats() {
+        Settings.GateDirection direction = settings.getGateDirection();
+        Settings.GateDistribution distribution = settings.getGateDistribution();
+        Settings.GateCeiling ceiling = settings.getGateCeiling();
+        Settings.GateEvoHandling evoHandling = settings.getGateEvoHandling();
+        int threshold = settings.getGateThreshold();
+        int amount = settings.getGateAmount();
+        boolean amountRandom = settings.getGateAmountStyle() == Settings.GateAmountStyle.RANDOM;
+
+        // Always normalise to byte-range first, like the other base-stat modes.
+        romHandler.getSpeciesSetInclFormes().forEach(this::clampBaseStatsToByte);
+
+        switch (evoHandling) {
+            case WHOLE_LINE:
+                gateWholeLine(direction, distribution, ceiling, threshold, amount, amountRandom);
+                break;
+            case KEEP_BELOW_EVO:
+                gateKeepBelowEvo(direction, distribution, ceiling, threshold, amount, amountRandom);
+                break;
+            case PER_STAGE:
+            default:
+                for (Species pk : romHandler.getSpeciesSetInclFormes()) {
+                    gateSingleSpecies(pk, direction, distribution, ceiling, threshold, amount, amountRandom);
+                }
+                break;
+        }
+
+        // Keep cosmetic formes consistent with their base forme.
+        romHandler.getSpeciesSetInclFormes().filter(Species::isActuallyCosmetic)
+                .forEach(pk -> pk.copyBaseFormeBaseStats(pk.getBaseForme()));
+
+        changesMade = true;
+    }
+
+    /**
+     * PER_STAGE handling: each species is gated independently by its own BST.
+     * Returns true if the species qualified and was changed.
+     */
+    private boolean gateSingleSpecies(Species pk, Settings.GateDirection direction,
+                                      Settings.GateDistribution distribution, Settings.GateCeiling ceiling,
+                                      int threshold, int amount, boolean amountRandom) {
+        int currentBST = pk.getBST();
+        int sign = gateSignFor(currentBST, direction, threshold);
+        if (sign == 0) {
+            return false;
+        }
+
+        int magnitude = amountRandom ? (1 + random.nextInt(Math.max(1, amount))) : amount;
+        int newBST = applyCeiling(currentBST, sign * magnitude, sign, ceiling, threshold);
+        if (newBST == currentBST) {
+            return false;
+        }
+
+        applyNewBST(pk, newBST, distribution);
+        return true;
+    }
+
+    /**
+     * WHOLE_LINE handling: gate by the line's base-form BST. If the base qualifies, the
+     * whole line is scaled consistently using a proportional copy-up (so it stays coherent).
+     */
+    private void gateWholeLine(Settings.GateDirection direction, Settings.GateDistribution distribution,
+                               Settings.GateCeiling ceiling, int threshold, int amount, boolean amountRandom) {
+        // Buff/nerf the basic species (gated by its own BST), then copy the change up the
+        // evolution line proportionally so every stage moves together.
+        BasicSpeciesAction<Species> bpAction = pk ->
+                gateSingleSpecies(pk, direction, distribution, ceiling, threshold, amount, amountRandom);
+        EvolvedSpeciesAction<Species> copyAction = (evFrom, evTo, toMonIsFinalEvo) ->
+                copyRandomizedStatsUpEvolution(evFrom, evTo);
+
+        // evolutionSanity=true so we walk lines; copySplitEvos=false so split evos copy from
+        // their (already gated) pre-evo too, keeping the whole family consistent.
+        copyUpEvolutionsHelper.apply(true, false, bpAction, copyAction);
+    }
+
+    /**
+     * KEEP_BELOW_EVO handling: buff each stage independently, then walk each evolution line
+     * from the base up and cap each lower stage so its BST stays strictly below the BST of
+     * what it evolves into. Scales the lower stage down proportionally if it would reach or
+     * exceed its evolution.
+     */
+    private void gateKeepBelowEvo(Settings.GateDirection direction, Settings.GateDistribution distribution,
+                                  Settings.GateCeiling ceiling, int threshold, int amount, boolean amountRandom) {
+        // First, gate every species independently (per-stage).
+        for (Species pk : romHandler.getSpeciesSetInclFormes()) {
+            gateSingleSpecies(pk, direction, distribution, ceiling, threshold, amount, amountRandom);
+        }
+
+        // Then enforce "stage strictly below its evolution" across each line, processing
+        // from basic species upward so a capped lower stage constrains the next one.
+        SpeciesSet allSpecs = romHandler.getSpeciesSetInclFormes();
+        Set<Species> processed = new HashSet<>();
+        Deque<Species> queue = new ArrayDeque<>();
+        for (Species pk : allSpecs) {
+            if (isGateBasicSpecies(allSpecs, pk)) {
+                queue.add(pk);
+            }
+        }
+        while (!queue.isEmpty()) {
+            Species from = queue.poll();
+            if (!processed.add(from)) {
+                continue;
+            }
+            for (Evolution evo : from.getEvolutionsFrom()) {
+                Species to = evo.getTo();
+                if (to == null || !allSpecs.contains(to) || to == from) {
+                    continue;
+                }
+                capStageBelowEvolution(from, to);
+                queue.add(to);
+            }
+        }
+    }
+
+    private boolean isGateBasicSpecies(SpeciesSet allSpecs, Species spec) {
+        for (Evolution evo : spec.getEvolutionsTo()) {
+            if (allSpecs.contains(evo.getFrom())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Ensures {@code from}'s BST is strictly below {@code to}'s BST. If it isn't, the
+     * lower stage ({@code from}) is scaled down proportionally so it lands just below.
+     */
+    private void capStageBelowEvolution(Species from, Species to) {
+        int fromBST = from.getBST();
+        int evoBST = to.getBST();
+        if (fromBST < evoBST) {
+            return;
+        }
+        // Target: one full point below the evolution's BST (but never below the line minimum).
+        int minSum = (from.getNumber() == SpeciesIDs.shedinja)
+                ? (SHEDINJA_HP + 5 * MIN_NON_HP_STAT)
+                : (MIN_HP + 5 * MIN_NON_HP_STAT);
+        int targetBST = Math.max(minSum, evoBST - 1);
+        if (targetBST >= fromBST) {
+            // Evolution is at/below the floor; nothing sensible to do.
+            return;
+        }
+        // Reuse the proportional path: distribute targetBST across current stats as weights.
+        applyNewBST(from, targetBST, Settings.GateDistribution.PROPORTIONAL);
+    }
+
+    /**
+     * Decides the direction of change for a species with the given BST.
+     * @return +1 to buff, -1 to nerf, 0 to leave unchanged.
+     */
+    private int gateSignFor(int currentBST, Settings.GateDirection direction, int threshold) {
+        boolean buffsBelow = direction == Settings.GateDirection.BUFF_BELOW
+                || direction == Settings.GateDirection.BOTH;
+        boolean nerfsAbove = direction == Settings.GateDirection.NERF_ABOVE
+                || direction == Settings.GateDirection.BOTH;
+        if (buffsBelow && currentBST <= threshold) {
+            return 1;
+        }
+        if (nerfsAbove && currentBST >= threshold) {
+            return -1;
+        }
+        return 0;
+    }
+
+    /**
+     * Applies the ceiling/floor rule to a proposed BST change.
+     * For buffs (sign &gt; 0) with CAP_AT_THRESHOLD, the new BST never exceeds the threshold.
+     * For nerfs (sign &lt; 0) with CAP_AT_THRESHOLD, the new BST never drops below the threshold.
+     */
+    private int applyCeiling(int currentBST, int signedDelta, int sign, Settings.GateCeiling ceiling, int threshold) {
+        int newBST = currentBST + signedDelta;
+        if (ceiling == Settings.GateCeiling.CAP_AT_THRESHOLD) {
+            if (sign > 0 && newBST > threshold) {
+                newBST = threshold;
+            } else if (sign < 0 && newBST < threshold) {
+                newBST = threshold;
+            }
+        }
+        // Never let the BST fall below the per-species minimum sum, nor exceed 6*255.
+        newBST = Math.max(newBST, 6);
+        newBST = Math.min(newBST, 6 * 255);
+        return newBST;
+    }
+
+    /**
+     * Sets a species' 6 stats so they sum (as closely as possible) to {@code newBST},
+     * using the chosen distribution. Honors the Shedinja HP=1 special case.
+     */
+    protected void applyNewBST(Species pk, int newBST, Settings.GateDistribution distribution) {
+        boolean shedinja = pk.getNumber() == SpeciesIDs.shedinja;
+        int[] baseMins = shedinja
+                ? new int[]{SHEDINJA_HP, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT}
+                : new int[]{MIN_HP, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT, MIN_NON_HP_STAT};
+        int[] maxes = shedinja
+                ? new int[]{SHEDINJA_HP, 255, 255, 255, 255, 255}
+                : new int[]{255, 255, 255, 255, 255, 255};
+
+        int[] current = new int[]{pk.getHp(), pk.getAttack(), pk.getDefense(),
+                pk.getSpatk(), pk.getSpdef(), pk.getSpeed()};
+
+        double[] weights = new double[6];
+        switch (distribution) {
+            case EVEN: {
+                // Split the *delta* equally across the stats by weighting the current
+                // stats plus an equal share, i.e. distribute the new total with equal weights.
+                for (int i = 0; i < 6; i++) {
+                    weights[i] = 1.0;
+                }
+                if (shedinja) {
+                    weights[0] = 0.0;
+                }
+                break;
+            }
+            case RANDOM: {
+                for (int i = 0; i < 6; i++) {
+                    weights[i] = random.nextDouble();
+                }
+                if (shedinja) {
+                    weights[0] = 0.0;
+                }
+                break;
+            }
+            case PROPORTIONAL:
+            default: {
+                // Scale the whole spread by newBST/oldBST: weight each stat by its current value.
+                for (int i = 0; i < 6; i++) {
+                    weights[i] = Math.max(current[i], 1);
+                }
+                if (shedinja) {
+                    weights[0] = 0.0;
+                }
+                break;
+            }
+        }
+
+        int[] stats = distributeStatsWithCaps(newBST, baseMins, maxes, weights);
+        if (shedinja) {
+            stats[0] = SHEDINJA_HP;
+        }
+        pk.setHp(clampStat(stats[0], shedinja ? SHEDINJA_HP : MIN_HP, 255));
+        pk.setAttack(clampStat(stats[1], 1, 255));
+        pk.setDefense(clampStat(stats[2], 1, 255));
+        pk.setSpatk(clampStat(stats[3], 1, 255));
+        pk.setSpdef(clampStat(stats[4], 1, 255));
+        pk.setSpeed(clampStat(stats[5], 1, 255));
+        // Note: PROPORTIONAL keeps shape because the weights are the current stats, so the
+        // result is approximately current * (newBST / oldBST) up to rounding and stat caps.
     }
 
     protected void randomizeStatsWithinBST(Species pk) {

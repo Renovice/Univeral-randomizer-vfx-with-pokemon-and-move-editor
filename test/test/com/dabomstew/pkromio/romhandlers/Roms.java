@@ -72,7 +72,9 @@ public class Roms {
     public static String[] getRoms(int[] generations, Region[] regions, boolean includeUntestable) {
         List<String> roms = new ArrayList<>();
         for (int gen : generations) {
-            List<String> ofGen = ALL_ROMS_BY_GENERATION.get(gen - 1);
+            // Copy before filtering — removeIf() would otherwise permanently mutate the shared
+            // static ALL_ROMS_BY_GENERATION list, corrupting later tests in the same JVM.
+            List<String> ofGen = new ArrayList<>(ALL_ROMS_BY_GENERATION.get(gen - 1));
             if (gen < 6) {
                 ofGen.removeIf(s -> !isOfRegion(s, regions));
             }
