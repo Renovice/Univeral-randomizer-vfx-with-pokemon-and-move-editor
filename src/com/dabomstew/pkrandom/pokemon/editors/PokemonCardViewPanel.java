@@ -2007,29 +2007,50 @@ public class PokemonCardViewPanel extends JPanel {
      * card), so the type boxes aren't flat mono. An empty value (no Type 2) keeps theme colours.
      */
     private void applyTypeColorRenderer(JComboBox<String> combo) {
+        // Popup items: color each option by its type.
         final javax.swing.ListCellRenderer<? super String> base = combo.getRenderer();
         combo.setRenderer((list, value, index, isSelected, cellHasFocus) -> {
             java.awt.Component comp = base.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-            if (!(comp instanceof JLabel)) {
-                return comp;
-            }
-            JLabel label = (JLabel) comp;
-            String s = value == null ? "" : value.toString();
-            Type t = null;
-            if (!s.isEmpty()) {
-                try {
-                    t = parseType(s);
-                } catch (Exception ignored) {
-                    t = null;
+            if (comp instanceof JLabel) {
+                Type t = parseTypeSafe(value);
+                if (t != null) {
+                    JLabel label = (JLabel) comp;
+                    label.setOpaque(true);
+                    label.setBackground(typeColor(t));
+                    label.setForeground(Color.WHITE);
                 }
             }
-            if (t != null) {
-                label.setOpaque(true);
-                label.setBackground(typeColor(t));
-                label.setForeground(Color.WHITE);
-            }
-            return label;
+            return comp;
         });
+        // Closed box (the card preview itself): FlatLaf doesn't honor the renderer's background for
+        // the combo's display area, so color the combo directly and keep it in sync on change.
+        combo.addActionListener(e -> recolorTypeCombo(combo));
+        recolorTypeCombo(combo);
+    }
+
+    /** Colors a type combo's closed display by its currently-selected type. */
+    private void recolorTypeCombo(JComboBox<String> combo) {
+        Type t = parseTypeSafe(combo.getSelectedItem());
+        if (t != null) {
+            combo.setBackground(typeColor(t));
+            combo.setForeground(Color.WHITE);
+        } else {
+            combo.setBackground(FIELD_BG);
+            combo.setForeground(TEXT_PRIMARY);
+        }
+    }
+
+    /** Parses a Type name to a Type, or null for empty/unknown values. */
+    private Type parseTypeSafe(Object value) {
+        String s = value == null ? "" : value.toString();
+        if (s.isEmpty()) {
+            return null;
+        }
+        try {
+            return parseType(s);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static JComponent typeChip(Type type) {
