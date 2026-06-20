@@ -21,6 +21,7 @@ import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Image;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -97,11 +98,14 @@ class TypeEffectivenessEditorDialog extends JDialog {
             // Convert type name to capitalized format (e.g., NORMAL -> Normal)
             String typeName = type.name().substring(0, 1).toUpperCase() + type.name().substring(1).toLowerCase();
             String iconPath = "/com/dabomstew/pkromio/graphics/resources/type_icons/" + typeName + ".png";
-            try {
-                Image img = ImageIO.read(getClass().getResourceAsStream(iconPath));
-                if (img != null) {
-                    icons.put(type, new ImageIcon(img));
+            try (InputStream in = getClass().getResourceAsStream(iconPath)) {
+                if (in != null) {
+                    Image img = ImageIO.read(in);
+                    if (img != null) {
+                        icons.put(type, new ImageIcon(img));
+                    }
                 }
+                // Missing resource (in == null): fall back to color-only display.
             } catch (IOException | IllegalArgumentException e) {
                 // Icon not found, will fall back to color-only display
                 System.err.println("Warning: Could not load type icon for " + type.name() + ": " + e.getMessage());

@@ -170,7 +170,7 @@ public class SpeciesBaseStatRandomizer extends Randomizer {
         }
 
         int magnitude = amountRandom ? (1 + random.nextInt(Math.max(1, amount))) : amount;
-        int newBST = applyCeiling(currentBST, sign * magnitude, sign, ceiling, threshold);
+        int newBST = applyCeiling(pk, currentBST, sign * magnitude, sign, ceiling, threshold);
         if (newBST == currentBST) {
             return false;
         }
@@ -282,13 +282,15 @@ public class SpeciesBaseStatRandomizer extends Randomizer {
         if (fromBST < evoBST) {
             return;
         }
-        // Target: one full point below the evolution's BST (but never below the line minimum).
-        int minSum = (from.getNumber() == SpeciesIDs.shedinja)
-                ? (SHEDINJA_HP + 5 * MIN_NON_HP_STAT)
-                : (MIN_HP + 5 * MIN_NON_HP_STAT);
+        // Target: one full point below the evolution's BST (but never below the achievable minimum).
+        int minSum = achievableMinBST(from);
         int targetBST = Math.max(minSum, evoBST - 1);
-        if (targetBST >= fromBST) {
-            // Evolution is at/below the floor; nothing sensible to do.
+        // Unachievable-edge case: strictly-below cannot be realised. This happens when the evolution's
+        // BST is at/below 'from's achievable minimum (so 'from' cannot be distributed any lower than the
+        // evolution), or when flooring the target leaves it at/above 'from's current BST. In either case
+        // forcing applyNewBST would only drive 'from' up to (or equal to) the evolution while falsely
+        // implying it was capped below it, so skip the cap entirely (best-effort, no silent wrong claim).
+        if (evoBST <= minSum || targetBST >= fromBST) {
             return;
         }
         // Reuse the proportional path: distribute targetBST across current stats as weights.
@@ -318,7 +320,7 @@ public class SpeciesBaseStatRandomizer extends Randomizer {
      * For buffs (sign &gt; 0) with CAP_AT_THRESHOLD, the new BST never exceeds the threshold.
      * For nerfs (sign &lt; 0) with CAP_AT_THRESHOLD, the new BST never drops below the threshold.
      */
-    private int applyCeiling(int currentBST, int signedDelta, int sign, Settings.GateCeiling ceiling, int threshold) {
+    private int applyCeiling(Species pk, int currentBST, int signedDelta, int sign, Settings.GateCeiling ceiling, int threshold) {
         int newBST = currentBST + signedDelta;
         if (ceiling == Settings.GateCeiling.CAP_AT_THRESHOLD) {
             if (sign > 0 && newBST > threshold) {
@@ -327,10 +329,24 @@ public class SpeciesBaseStatRandomizer extends Randomizer {
                 newBST = threshold;
             }
         }
-        // Never let the BST fall below the per-species minimum sum, nor exceed 6*255.
-        newBST = Math.max(newBST, 6);
+        // Never let the BST fall below the per-species achievable minimum sum (the same floor the
+        // distribute step enforces via baseMins + the MIN_HP HP-floor), nor exceed 6*255. Flooring at
+        // this real minimum (rather than 6) means a requested target below it is clamped here instead
+        // of being silently inflated above the request by the post-distribute clampStat.
+        newBST = Math.max(newBST, achievableMinBST(pk));
         newBST = Math.min(newBST, 6 * 255);
         return newBST;
+    }
+
+    /**
+     * The smallest BST sum {@link #applyNewBST} can actually realise for this species: the sum of the
+     * per-stat minimums (honoring the Shedinja HP=1 special case), i.e. {@code MIN_HP + 5*MIN_NON_HP_STAT}
+     * for normal species and {@code SHEDINJA_HP + 5*MIN_NON_HP_STAT} for Shedinja.
+     */
+    private int achievableMinBST(Species pk) {
+        return (pk.getNumber() == SpeciesIDs.shedinja)
+                ? (SHEDINJA_HP + 5 * MIN_NON_HP_STAT)
+                : (MIN_HP + 5 * MIN_NON_HP_STAT);
     }
 
     /**

@@ -1,5 +1,18 @@
 # Finding Log
 
+## 2026-06-20 - Remaining LOW-severity fixes (1.0.7)
+
+Hypothesis: the 10 LOW items from the audit are worth fixing too.
+Finding: **True** — 9 fixed (the 10th, NDSRom.copy EOF, was already fixed in the 1.0.6 batch). 4 files, central clean build + dup-check + headless-load + GUI-boot smoke test all green.
+Fixes:
+- SpeciesBaseStatRandomizer: new achievableMinBST(Species) helper (Shedinja HP=1 -> 51, else 70); applyCeiling now floors at the real achievable minimum instead of 6 so low gate targets are honored (no silent HP-clamp inflation); capStageBelowEvolution skips when strictly-below is unachievable (evoBST <= minSum) instead of leaving from >= evo. (#24/#25; #25's floor also removes most #24 triggers.)
+- RandomizerGUI: attemptToLogException System.err redirect now synchronized on a static lock (#26); batch SwingWorker setCursor moved onto the EDT (#30); loadQS/saveQS, the update-check BufferedReader+HttpURLConnection, and saveLogFile all converted to try-with-resources / finally (#29/#31/#32).
+- AbstractGBRomHandler.saveRomFile: try-with-resources + delete partial file on failure + null-message guard (#28).
+- TypeEffectivenessEditorDialog.loadTypeIcons: icon resource streams opened in try-with-resources with null guard (#33).
+Reason: mechanical leak/EDT fixes + the two BST-floor edge cases; verified by build + smoke tests.
+Next Step: none — all 32 actionable audit findings (10 high + 13 med + 9 low; 1 low pre-fixed) resolved; the only non-fix was the #8 Gen7 false positive.
+
+
 ## 2026-06-20 - Multi-agent bug audit + 22 High/Medium fixes (1.0.6)
 
 Hypothesis: a broad multi-agent audit (find + adversarial verify) would surface real bugs in recent work + high-risk areas.

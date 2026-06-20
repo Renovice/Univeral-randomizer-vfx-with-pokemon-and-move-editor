@@ -398,6 +398,11 @@ public class RandomizerGUI {
 
     private static final Random RND = new Random();
 
+    // Guards the System.err save/redirect/restore region in attemptToLogException so a
+    // concurrent error log (background randomize thread + EDT) can't leave stderr pointing
+    // at a closed stream.
+    private static final Object ERR_REDIRECT_LOCK = new Object();
+
     private static JFrame frame;
 
     private static String launcherInput = "";
@@ -496,17 +501,17 @@ public class RandomizerGUI {
                 conn.setConnectTimeout(2000);
                 conn.setReadTimeout(2000);
 
-                BufferedReader br = new BufferedReader(new InputStreamReader((conn.getInputStream())));
-
-                String output;
-                while ((output = br.readLine()) != null) {
-                    String[] a = output.split("tag_name\":\"");
-                    if (a.length > 1) {
-                        latestVersionString = a[1].split("\",")[0];
+                try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream()))) {
+                    String output;
+                    while ((output = br.readLine()) != null) {
+                        String[] a = output.split("tag_name\":\"");
+                        if (a.length > 1) {
+                            latestVersionString = a[1].split("\",")[0];
+                        }
                     }
+                } finally {
+                    conn.disconnect();
                 }
-
-                conn.disconnect();
 
             } catch (Exception e) {
                 // Offline, or a Java runtime whose CA store predates GitHub's
@@ -1263,7 +1268,7 @@ public class RandomizerGUI {
 
                 @Override
                 protected Void doInBackground() {
-                    frame.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+                    SwingUtilities.invokeLater(() -> frame.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR)));
                     SwingUtilities.invokeLater(() -> batchProgressDialog.setVisible(true));
                     for (i = startingIndex; i < endingIndex; i++) {
                         String fileName = batchRandomizationSettings.getOutputDirectory() +
@@ -1351,9 +1356,10 @@ public class RandomizerGUI {
         if (returnVal == JFileChooser.APPROVE_OPTION) {
             File fh = qsOpenChooser.getSelectedFile();
             try {
-                FileInputStream fis = new FileInputStream(fh);
-                Settings settings = Settings.read(fis);
-                fis.close();
+                final Settings settings;
+                try (FileInputStream fis = new FileInputStream(fh)) {
+                    settings = Settings.read(fis);
+                }
 
                 SwingUtilities.invokeLater(() -> {
                     // load settings
@@ -1397,10 +1403,8 @@ public class RandomizerGUI {
             // Fix or add extension
             fh = FileFunctions.fixFilename(fh, "rnqs");
             // Save now?
-            try {
-                FileOutputStream fos = new FileOutputStream(fh);
+            try (FileOutputStream fos = new FileOutputStream(fh)) {
                 getCurrentSettings().write(fos);
-                fos.close();
             } catch (IOException ex) {
                 JOptionPane.showMessageDialog(frame, bundle.getString("GUI.settingsSaveFailed"));
             }
@@ -1573,12 +1577,12 @@ public class RandomizerGUI {
     }
 
     private void saveLogFile(String filename, byte[] out) throws IOException {
-        FileOutputStream fos = new FileOutputStream(filename + ".log");
-        fos.write(0xEF);
-        fos.write(0xBB);
-        fos.write(0xBF);
-        fos.write(out);
-        fos.close();
+        try (FileOutputStream fos = new FileOutputStream(filename + ".log")) {
+            fos.write(0xEF);
+            fos.write(0xBB);
+            fos.write(0xBF);
+            fos.write(out);
+        }
     }
 
     private void presetLoader() {
@@ -2602,42 +2606,44 @@ public class RandomizerGUI {
             // Restore System.err and close the log stream no matter what happens below, so a failure
             // while writing diagnostics (e.g. when no ROM is loaded) can't leave stderr redirected to
             // a stream we're about to close.
-            PrintStream e1 = System.err;
-            try {
-                ps.println("Randomizer Version: " + Version.VERSION_STRING);
-                if (seedString != null) {
-                    ps.println("Seed: " + seedString);
-                }
-                if (settingsString != null) {
-                    ps.println("Settings String: " + Version.VERSION + settingsString);
-                }
-                ps.println("Java Version: " + System.getProperty("java.version") + ", "
-                        + System.getProperty("java.vm.name"));
-                System.setErr(ps);
-                if (this.romHandler != null) {
-                    try {
-                        ps.println("ROM: " + romHandler.getROMName());
-                        ps.println("Code: " + romHandler.getROMCode());
-                        ps.println("Reported Support Level: " + romHandler.getSupportLevel());
-                        ps.println();
-                    } catch (Exception ex2) {
-                        // Do nothing, just don't fail
+            synchronized (ERR_REDIRECT_LOCK) {
+                PrintStream e1 = System.err;
+                try {
+                    ps.println("Randomizer Version: " + Version.VERSION_STRING);
+                    if (seedString != null) {
+                        ps.println("Seed: " + seedString);
                     }
-                }
-                ex.printStackTrace();
-                ps.println();
-                ps.println("--ROM Diagnostics--");
-                if (this.romHandler != null) {
-                    if (!romHandler.isRomValid(null)) {
-                        ps.println(bundle.getString("Log.InvalidRomLoaded"));
+                    if (settingsString != null) {
+                        ps.println("Settings String: " + Version.VERSION + settingsString);
                     }
-                    romHandler.printRomDiagnostics(ps);
-                } else {
-                    ps.println("No ROM loaded.");
+                    ps.println("Java Version: " + System.getProperty("java.version") + ", "
+                            + System.getProperty("java.vm.name"));
+                    System.setErr(ps);
+                    if (this.romHandler != null) {
+                        try {
+                            ps.println("ROM: " + romHandler.getROMName());
+                            ps.println("Code: " + romHandler.getROMCode());
+                            ps.println("Reported Support Level: " + romHandler.getSupportLevel());
+                            ps.println();
+                        } catch (Exception ex2) {
+                            // Do nothing, just don't fail
+                        }
+                    }
+                    ex.printStackTrace();
+                    ps.println();
+                    ps.println("--ROM Diagnostics--");
+                    if (this.romHandler != null) {
+                        if (!romHandler.isRomValid(null)) {
+                            ps.println(bundle.getString("Log.InvalidRomLoaded"));
+                        }
+                        romHandler.printRomDiagnostics(ps);
+                    } else {
+                        ps.println("No ROM loaded.");
+                    }
+                } finally {
+                    System.setErr(e1);
+                    ps.close();
                 }
-            } finally {
-                System.setErr(e1);
-                ps.close();
             }
             final String errlogFinal = errlog;
             runOnEDT(() -> {
