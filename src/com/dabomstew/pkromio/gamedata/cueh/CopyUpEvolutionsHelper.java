@@ -175,10 +175,17 @@ public class CopyUpEvolutionsHelper<T extends Species> {
                 // Non-processed specs at this point must have
                 // a linear chain of single evolutions down to
                 // a processed spec.
+                // Track visited species while walking "up" the prevolution chain, so that a
+                // cyclic evolution graph (e.g. A->B->A, producible by "Evolve Every Level")
+                // does not loop forever / OOM. The visited-set only stops the walk on a
+                // revisit, so behavior on normal acyclic graphs is unchanged.
                 Stack<Evolution> evStack = new Stack<>();
+                Set<Species> visited = new HashSet<>();
                 Evolution ev = pk.getEvolutionsTo().get(0);
-                while (!processed.contains(ev.getFrom())) {
+                visited.add(pk);
+                while (!processed.contains(ev.getFrom()) && !visited.contains(ev.getFrom())) {
                     evStack.push(ev);
+                    visited.add(ev.getFrom());
                     ev = ev.getFrom().getEvolutionsTo().get(0);
                 }
                 evStack.push(ev);

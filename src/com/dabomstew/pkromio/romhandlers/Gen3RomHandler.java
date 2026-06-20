@@ -81,13 +81,21 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
     }
 
     private static Map<String, Integer> initTypeEffectivenessPointerMap() {
+        // Keyed by ROM code AND version (code + ":" + version). Only (code, version)
+        // pairs whose type-effectiveness pointer location is verified are listed here;
+        // unlisted pairs (e.g. retail revisions like v1.1) fall back to the .ini
+        // TypeEffectivenessOffset rather than being overridden with a wrong offset.
         Map<String, Integer> pointers = new HashMap<>();
-        pointers.put("AXPE", 0x1CDC8);
-        pointers.put("AXVE", 0x1CDC8);
-        pointers.put("BPGE", 0x1E944);
-        pointers.put("BPRE", 0x1E944);
-        pointers.put("BPEE", 0x47134);
+        pointers.put("AXPE:0", 0x1CDC8);
+        pointers.put("AXVE:0", 0x1CDC8);
+        pointers.put("BPGE:0", 0x1E944);
+        pointers.put("BPRE:0", 0x1E944);
+        pointers.put("BPEE:0", 0x47134);
         return Collections.unmodifiableMap(pointers);
+    }
+
+    private static String typeEffectivenessPointerKey(String romCode, int version) {
+        return romCode + ":" + version;
     }
 
     private static void loadROMInfo() {
@@ -315,7 +323,8 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             if (romEntry == null) {
                 return;
             }
-            Integer pointerLocation = TYPE_EFFECTIVENESS_POINTERS.get(romEntry.getRomCode());
+            Integer pointerLocation = TYPE_EFFECTIVENESS_POINTERS.get(
+                    typeEffectivenessPointerKey(romEntry.getRomCode(), romEntry.getVersion()));
             if (pointerLocation == null) {
                 return;
             }
@@ -1013,6 +1022,7 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             case Gen3Constants.futureSightAndDoomDesireEffect:
             case Gen3Constants.spitUpEffect:
                 move.criticalChance = CriticalChance.NONE;
+                break;
 
             case Gen3Constants.flinchEffect:
             case Gen3Constants.snoreEffect:
@@ -4325,9 +4335,11 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
     }
 
     private int replacePointerBytes(byte[] oldPointer, byte[] newPointer) {
-        // Scan entire ROM to swap any references to the original effectiveness table.
+        // Swap references to the original effectiveness table. Only overwrite 4-byte-aligned
+        // matches: GBA pointers are word-aligned, so this avoids corrupting unrelated,
+        // coincidental (and unaligned) 4-byte sequences elsewhere in the ROM.
         int replacements = 0;
-        for (int i = 0; i <= rom.length - oldPointer.length; i++) {
+        for (int i = 0; i <= rom.length - oldPointer.length; i += 4) {
             boolean match = true;
             for (int j = 0; j < oldPointer.length; j++) {
                 if (rom[i + j] != oldPointer[j]) {
@@ -4338,7 +4350,6 @@ public class Gen3RomHandler extends AbstractGBRomHandler {
             if (match) {
                 writeBytes(i, newPointer);
                 replacements++;
-                i += oldPointer.length - 1;
             }
         }
         return replacements;

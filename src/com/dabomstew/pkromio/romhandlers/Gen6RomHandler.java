@@ -3148,7 +3148,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
     public List<Integer> getTMMoves() {
         String tmDataPrefix = Gen6Constants.tmDataPrefix;
         int offset = find(code, tmDataPrefix);
-        if (offset != 0) {
+        if (offset > 0) {
             offset += Gen6Constants.tmDataPrefix.length() / 2; // because it was a prefix
             List<Integer> tms = new ArrayList<>();
             for (int i = 0; i < Gen6Constants.tmBlockOneCount; i++) {
@@ -3168,7 +3168,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
     public List<Integer> getHMMoves() {
         String tmDataPrefix = Gen6Constants.tmDataPrefix;
         int offset = find(code, tmDataPrefix);
-        if (offset != 0) {
+        if (offset > 0) {
             offset += Gen6Constants.tmDataPrefix.length() / 2; // because it was a prefix
             offset += Gen6Constants.tmBlockOneCount * 2; // TM data
             List<Integer> hms = new ArrayList<>();

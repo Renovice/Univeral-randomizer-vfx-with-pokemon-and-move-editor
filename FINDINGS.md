@@ -1,5 +1,17 @@
 # Finding Log
 
+## 2026-06-20 - Second audit pass: 12 fixes in randomizer cores + per-gen handlers (1.0.8)
+
+Hypothesis: a second audit on subsystems NOT covered by pass 1 (core randomizers + per-gen ROM handlers + Settings/text/patching) would find more real bugs.
+Finding: **True.** 12 finders -> 14 raw -> 12 confirmed (5 high, 4 med, 3 low); 2 false positives filtered. ALL 12 in upstream code (none in our new features). Fixed all 12; central clean build + dup-check + headless-load + GUI-boot smoke test green.
+HIGH: TrainerPokemonRandomizer empty-pool crash (added cacheOrReplacement fallback before getRandomSpecies); WildEncounterRandomizer.enforceMultipleSpecies crash on Gen4 Trophy Garden (use setupAllowedForReplacementNoInfoMap + inline non-balance pick, no info-map lookup of post-randomization species); StarterRandomizer type-triangle infinite hang (remove from the iterated list + assign triangle only on success); Gen2RomHandler.setStarterHeldItems item id mangle (removed & 0xFF); Gen3RomHandler type-effectiveness pointer keyed by code-only ignoring revision (key on code+version).
+MED: randomUsableZCrystals all-zero-moveset throw (skip + null-guard); WildEncounterRandomizer allowedByType ignored basicPokemonOnly (use this.allowed); CopyUpEvolutionsHelper infinite loop/OOM on cyclic evolutions (cycle-safe visited set in the prevolution walk -- benefits all callers incl. BST gate); Gen6 getTMMoves/getHMMoves `!= 0` -> `> 0`.
+LOW: addTrainerPokemon throw on 0-mon trainer (skip); Gen3 writeTypeTable whole-ROM repoint (restrict); Gen3 loadMiscMoveInfoFromEffect missing break (Future Sight/Doom Desire/Spit Up).
+FALSE POSITIVES (verified, not fixed): Settings.setBlockBrokenMoves "never assigns field" (verifier disproved); Gen3 writeTypeTable alignment-byte leak.
+Reason: each fix reused existing helpers/patterns; build + smoke verified.
+Next Step: none outstanding from pass 2. Future areas not yet audited: graphics/palette/CPG, misc-tweak application, the CLI arg parsing.
+
+
 ## 2026-06-20 - Remaining LOW-severity fixes (1.0.7)
 
 Hypothesis: the 10 LOW items from the audit are worth fixing too.

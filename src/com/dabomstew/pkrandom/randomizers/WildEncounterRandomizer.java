@@ -191,7 +191,7 @@ public class WildEncounterRandomizer extends Randomizer {
 
             this.banned = banned;
             if (needsTypes) {
-                this.allowedByType = allowed.sortByType(false, typeService.getTypes());
+                this.allowedByType = this.allowed.sortByType(false, typeService.getTypes());
             }
             //any algorithm that uses mapping should use remaining, not just catch-em-all
             //easiest to just always use it
@@ -884,16 +884,29 @@ public class WildEncounterRandomizer extends Randomizer {
             Encounter toReplace = area.get(0);
             Species present = toReplace.getSpecies();
 
-            SpeciesSet pool = new SpeciesSet(setupAllowedForReplacement(present, area, zoneType));
+            // Build the alternative pool WITHOUT the info map. The info map is keyed by the
+            // area's ORIGINAL species, but randomizeArea has already replaced every encounter
+            // by the time this runs, so "present" is the post-randomization species and is not
+            // a key in areaInformationMap. Using setupAllowedForReplacementNoInfoMap() avoids
+            // the areaInformationMap.get(present) lookup that would otherwise throw.
+            SpeciesSet pool = new SpeciesSet(setupAllowedForReplacementNoInfoMap(present, area, zoneType));
             pool.remove(present);
             if (pool.isEmpty()) {
                 // No legal alternative species; leave the area as-is.
                 return;
             }
 
-            Species replacement = pickReplacement(present, pool);
-            // pickReplacement may return the original species (e.g. catch-em-all keeps banned
-            // species as-is); in that case there is no legal alternative, so leave it unchanged.
+            // Pick a replacement without going through the info-map (balance-level) branch of
+            // pickReplacement(), which would also dereference areaInformationMap.get(present).
+            Species replacement;
+            if (catchEmAll && banned.contains(present)) {
+                // catch-em-all keeps wild-banned species as-is; no legal alternative.
+                return;
+            } else if (similarStrength) {
+                replacement = pool.getRandomSimilarStrengthSpecies(present, random);
+            } else {
+                replacement = pool.getRandomSpecies(random);
+            }
             if (replacement == present) {
                 return;
             }

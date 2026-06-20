@@ -176,12 +176,13 @@ public class StarterRandomizer extends Randomizer {
                 picks = chooseStartersOfTypes(availablePokemonByType, triangle);
             } catch (RandomizationException e) {
                 //If it failed, it's because this triangle isn't valid.
-                typeTriangles.remove(triangle);
+                //Remove it from the collection being iterated so the loop converges.
+                typeTriangleList.remove(triangle);
                 picks = null; //this is theoretically unnecessary, but here for clarity
             }
 
             //we've succeeded. If this is the first trio of starters, set starter type triangle.
-            if(firstTrio) {
+            if(picks != null && firstTrio) {
                 romHandler.setStarterTypeTriangle(triangle);
             }
         }

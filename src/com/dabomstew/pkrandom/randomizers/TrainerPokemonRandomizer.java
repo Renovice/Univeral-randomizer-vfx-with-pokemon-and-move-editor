@@ -553,6 +553,13 @@ public class TrainerPokemonRandomizer extends Randomizer {
             //if we didn't... well, if it's banned anyway, it might as well be from the substitution set
         }
 
+        if (pickFrom.isEmpty() && !cacheOrReplacement.isEmpty()) {
+            //all filtering removed every candidate (e.g. ForceFullyEvolved + Type Themed,
+            //Diverse Types with a restricted dex, Local-only); rather than calling
+            //getRandomSpecies on an empty set (which throws), fall back to the parent pool
+            pickFrom = cacheOrReplacement;
+        }
+
         return usePowerLevels ?
                 pickFrom.getRandomSimilarStrengthSpecies(current, random) :
                 pickFrom.getRandomSpecies(random);
@@ -958,6 +965,9 @@ public class TrainerPokemonRandomizer extends Randomizer {
 
         List<Trainer> currentTrainers = romHandler.getTrainers();
         for (Trainer t : currentTrainers) {
+            // A trainer with no Pokemon has nothing to base additional members on
+            // (the logic below indexes into t.pokemon / originalPokes), so skip it.
+            if (t.pokemon.isEmpty()) continue;
             int additional;
             if (t.isBoss()) {
                 additional = additionalBoss;
@@ -1159,9 +1169,12 @@ public class TrainerPokemonRandomizer extends Randomizer {
                                         romHandler.getMovesLearnt(), tp.getLevel()) :
                                 tp.getMoves();
                         pokeMoves = Arrays.stream(pokeMoves).filter(mv -> mv != 0).toArray();
+                        if (pokeMoves.length == 0) continue; // no usable moves -> nothing to base a Z-crystal on
                         int chosenMove = pokeMoves[random.nextInt(pokeMoves.length)];
                         Type chosenMoveType = romHandler.getMoves().get(chosenMove).type;
-                        tp.setHeldItem(items.get(Gen7Constants.heldZCrystalsByType.get(chosenMoveType)));
+                        Integer zCrystalId = Gen7Constants.heldZCrystalsByType.get(chosenMoveType);
+                        if (zCrystalId == null) continue; // no Z-crystal exists for this move's type
+                        tp.setHeldItem(items.get(zCrystalId));
                     }
                 }
             }
