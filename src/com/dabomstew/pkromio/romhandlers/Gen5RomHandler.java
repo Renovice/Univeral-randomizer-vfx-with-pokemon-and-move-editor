@@ -85,6 +85,14 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
     private static final int DEFAULT_BW2_FAIRY_TABLE_OFFSET = 0x1740;
     private static final int DEFAULT_BW2_FAIRY_TABLE_OVERLAY = 167;
     private static final boolean DEBUG_TYPE_TABLE = Boolean.parseBoolean(System.getProperty("upr.debugTypeTable", "false"));
+
+    /** Prints type-table / Fairy-detection diagnostics only when -Dupr.debugTypeTable=true (off by
+     *  default), so normal ROM loads don't spam the console. */
+    private static void debugLog(String message) {
+        if (DEBUG_TYPE_TABLE) {
+            System.out.println(message);
+        }
+    }
     private static final byte[] B2W2_FAIRY_TABLE = new byte[] {
         4, 4, 4, 4, 4, 2, 4, 0, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4,
         8, 4, 2, 2, 4, 8, 2, 0, 8, 4, 4, 4, 4, 2, 8, 4, 8, 2,
@@ -2656,7 +2664,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             typeEffectivenessStoredInArm9 = false;
             resolvedTypeEffectivenessOffset = overlayOffset;
             if (DEBUG_TYPE_TABLE) {
-                System.out.println("DEBUG: Pointer resolved inside overlay " + overlayNumber + " at offset " + overlayOffset);
+                debugLog("DEBUG: Pointer resolved inside overlay " + overlayNumber + " at offset " + overlayOffset);
             }
             return new TypeTableBuffer(battleOverlay, false, overlayOffset);
         }
@@ -2666,13 +2674,13 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             typeEffectivenessStoredInArm9 = true;
             resolvedTypeEffectivenessOffset = arm9Offset;
             if (DEBUG_TYPE_TABLE) {
-                System.out.println("DEBUG: Pointer resolved inside ARM9 at offset " + arm9Offset);
+                debugLog("DEBUG: Pointer resolved inside ARM9 at offset " + arm9Offset);
             }
             return new TypeTableBuffer(arm9, true, arm9Offset);
         }
 
         if (DEBUG_TYPE_TABLE) {
-            System.out.println("DEBUG: Pointer-based lookup failed to resolve a valid table region.");
+            debugLog("DEBUG: Pointer-based lookup failed to resolve a valid table region.");
         }
         return null;
     }
@@ -2760,7 +2768,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             return;
         }
         String source = buffer.fromArm9 ? "ARM9" : ("overlay " + romEntry.getIntValue("BattleOvlNumber"));
-        System.out.println("DEBUG: Using " + method + " type table source: " + source + " offset " + buffer.offset + " width " + width);
+        debugLog("DEBUG: Using " + method + " type table source: " + source + " offset " + buffer.offset + " width " + width);
         dumpTypeTablePreview(buffer.data, buffer.offset, width);
     }
 
@@ -2768,7 +2776,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
         if (!DEBUG_TYPE_TABLE || data == null) {
             return;
         }
-        System.out.println("DEBUG: Type table preview (first 5 rows) starting at offset " + baseOffset);
+        debugLog("DEBUG: Type table preview (first 5 rows) starting at offset " + baseOffset);
         int rowsToShow = Math.min(width, 5);
         for (int row = 0; row < rowsToShow; row++) {
             StringBuilder sb = new StringBuilder();
@@ -2849,7 +2857,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
 
         int signatureMatch = findSignatureFairyTableOffset(data);
         if (signatureMatch != -1) {
-            System.out.println("DEBUG: Known BW2 fairy signature detected at offset 0x" + Integer.toHexString(signatureMatch));
+            debugLog("DEBUG: Known BW2 fairy signature detected at offset 0x" + Integer.toHexString(signatureMatch));
             return signatureMatch;
         }
 
@@ -3132,7 +3140,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
 
         // Quick check: if it matches the known vanilla b2w2-fairy table, it's definitely valid
         if (matchesB2W2FairyTable(data, offset)) {
-            System.out.println("DEBUG: Offset " + offset + " matches the known vanilla b2w2-fairy table signature.");
+            debugLog("DEBUG: Offset " + offset + " matches the known vanilla b2w2-fairy table signature.");
             return true;
         }
 
@@ -3168,39 +3176,39 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
      * @return true if the ROM has Fairy type in its type names list, false otherwise
      */
     private boolean detectFairyType() {
-        System.out.println("DEBUG: detectFairyType() called");
+        debugLog("DEBUG: detectFairyType() called");
         try {
             // Read the type names from the text file
             // BW1 uses text file 199, BW2 uses text file 398
             int textOffset = romEntry.getIntValue("TypeNamesTextOffset");
-            System.out.println("DEBUG: Reading type names from text offset: " + textOffset);
+            debugLog("DEBUG: Reading type names from text offset: " + textOffset);
 
             List<String> typeNames = getStrings(false, textOffset);
 
             if (typeNames == null) {
-                System.out.println("DEBUG: getStrings returned null!");
+                debugLog("DEBUG: getStrings returned null!");
                 return false;
             }
 
-            System.out.println("DEBUG: Type names count: " + typeNames.size());
+            debugLog("DEBUG: Type names count: " + typeNames.size());
 
             // Validate that we have a reasonable number of types (17 or 18)
             if (typeNames.size() != 17 && typeNames.size() != 18) {
-                System.out.println("DEBUG: Invalid type count (" + typeNames.size() + "). Expected 17 or 18. Assuming no Fairy.");
+                debugLog("DEBUG: Invalid type count (" + typeNames.size() + "). Expected 17 or 18. Assuming no Fairy.");
                 return false;
             }
 
             // Print all type names for debugging
-            System.out.println("DEBUG: All type names:");
+            debugLog("DEBUG: All type names:");
             for (int i = 0; i < typeNames.size(); i++) {
-                System.out.println("  [" + i + "] = '" + typeNames.get(i) + "'");
+                debugLog("  [" + i + "] = '" + typeNames.get(i) + "'");
             }
 
             // Validate the first type is "Normal" (sanity check for correct data)
             if (typeNames.size() > 0) {
                 String firstType = typeNames.get(0);
                 if (firstType == null || (!firstType.equalsIgnoreCase("Normal") && !firstType.toLowerCase().contains("normal"))) {
-                    System.out.println("DEBUG: First type is '" + firstType + "' instead of 'Normal'. Data may be corrupted. Assuming no Fairy.");
+                    debugLog("DEBUG: First type is '" + firstType + "' instead of 'Normal'. Data may be corrupted. Assuming no Fairy.");
                     return false;
                 }
             }
@@ -3211,22 +3219,22 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
                 String typeName = typeNames.get(i);
                 if (typeName != null && typeName.equalsIgnoreCase("Fairy")) {
                     hasFairy = true;
-                    System.out.println("DEBUG: Found Fairy type at index " + i);
+                    debugLog("DEBUG: Found Fairy type at index " + i);
                     break;
                 }
             }
 
             // Additional validation: if we found "Fairy", make sure we have exactly 18 types total
             if (hasFairy && typeNames.size() != 18) {
-                System.out.println("DEBUG: Fairy found but wrong type count (" + typeNames.size() + " instead of 18). Rejecting.");
+                debugLog("DEBUG: Fairy found but wrong type count (" + typeNames.size() + " instead of 18). Rejecting.");
                 return false;
             }
 
-            System.out.println("DEBUG: detectFairyType returning: " + hasFairy);
+            debugLog("DEBUG: detectFairyType returning: " + hasFairy);
             return hasFairy;
         } catch (Exception e) {
             // If anything goes wrong (missing text offset, etc.), assume no Fairy type
-            System.out.println("DEBUG: Exception in detectFairyType: " + e.getMessage());
+            debugLog("DEBUG: Exception in detectFairyType: " + e.getMessage());
             e.printStackTrace();
             return false;
         }
@@ -3332,7 +3340,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
                 return null;
             }
 
-            System.out.println("DEBUG: Using configured Fairy type table offset 0x"
+            debugLog("DEBUG: Using configured Fairy type table offset 0x"
                     + Integer.toHexString(overrideOffset)
                     + (overrideFromArm9 ? " (ARM9)" : " (overlay "
                     + (overrideOverlayNumber > 0 ? overrideOverlayNumber : romEntry.getIntValue("BattleOvlNumber"))

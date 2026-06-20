@@ -1138,7 +1138,11 @@ public class EditorUtils {
             adjusting = true;
             updateModelForQuery(filterText);
             applyEditorText(query, query.length());
-            if ((forcePopup || !(query.isEmpty())) && comboBox.isDisplayable()) {
+            // Only open the popup when the combo is actually showing on screen. isDisplayable() is
+            // not enough: a combo realized but not yet visible (during editor build, or on an
+            // unselected tab) makes JPopupMenu.show() throw IllegalComponentStateException when it
+            // tries to read the on-screen location. isShowing() also covers visibility/ancestors.
+            if ((forcePopup || !(query.isEmpty())) && comboBox.isShowing()) {
                 comboBox.setPopupVisible(true);
             }
             adjusting = false;
