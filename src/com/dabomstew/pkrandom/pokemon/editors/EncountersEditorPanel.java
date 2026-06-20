@@ -51,6 +51,9 @@ public class EncountersEditorPanel extends JPanel {
     private List<EncounterArea> working;           // deep copies; only these are edited
     private final boolean showForme;
     private final boolean showSOS;
+    // Gen7 stores ONE level range per area (only slot 0's level is written by
+    // setEncounters), so a per-slot level edit must be applied to every slot.
+    private final boolean areaWideLevels;
 
     private JList<AreaEntry> areaJList;
     private DefaultListModel<AreaEntry> areaListModel;
@@ -100,6 +103,8 @@ public class EncountersEditorPanel extends JPanel {
         }
         this.showForme = anyForme;
         this.showSOS = anySOS;
+        // Gen7 (SM/USUM) writes a single area-wide level range from slot 0 only.
+        this.areaWideLevels = romHandler.generationOfPokemon() == 7;
 
         this.speciesOptions = buildSpeciesOptions();
         initUI();
@@ -673,7 +678,16 @@ public class EncountersEditorPanel extends JPanel {
                 // Tolerate a null pick (e.g. "(None)"): leave the existing species
                 // untouched rather than nulling a slot the game expects to be filled.
                 if (picked != null && picked != enc.getSpecies()) {
-                    enc.setSpecies(picked);
+                    // Mirror WildEncounterRandomizer.setFormeForEncounter: a picked
+                    // forme must be stored as (base species + forme number), or the
+                    // forme is dropped/corrupted on Gen6/7 (which encode the forme
+                    // separately from the base dex number).
+                    enc.setFormeNumber(picked.getFormeNumber());
+                    Species base = picked;
+                    while (!base.isBaseForme()) {
+                        base = base.getBaseForme();
+                    }
+                    enc.setSpecies(base);
                     note(area, "slot " + (rowIndex + 1) + " species -> " + picked.getName());
                     fireTableRowsUpdated(rowIndex, rowIndex);
                 }
@@ -682,13 +696,18 @@ public class EncountersEditorPanel extends JPanel {
             if (columnIndex == colMin) {
                 int v = clamp(parseInt(aValue, enc.getLevel()), 1, 100);
                 if (v != enc.getLevel()) {
-                    enc.setLevel(v);
-                    // Keep a real range valid; maxLevel==0 stays "single level".
-                    if (enc.getMaxLevel() != 0 && enc.getMaxLevel() < v) {
-                        enc.setMaxLevel(v);
+                    // Gen7 persists ONE level range per area (slot 0 only), so a
+                    // per-slot min edit must be mirrored across every slot, or it
+                    // is silently lost on save. Other gens keep per-slot levels.
+                    for (Encounter target : levelEditTargets(enc)) {
+                        target.setLevel(v);
+                        // Keep a real range valid; maxLevel==0 stays "single level".
+                        if (target.getMaxLevel() != 0 && target.getMaxLevel() < v) {
+                            target.setMaxLevel(v);
+                        }
                     }
-                    note(area, "slot " + (rowIndex + 1) + " min level -> " + v);
-                    fireTableRowsUpdated(rowIndex, rowIndex);
+                    note(area, (areaWideLevels ? "area" : "slot " + (rowIndex + 1)) + " min level -> " + v);
+                    refreshAfterLevelEdit(rowIndex);
                 }
                 return;
             }
@@ -700,10 +719,39 @@ public class EncountersEditorPanel extends JPanel {
                     v = enc.getLevel();
                 }
                 if (v != enc.getMaxLevel()) {
-                    enc.setMaxLevel(v);
-                    note(area, "slot " + (rowIndex + 1) + " max level -> " + v);
-                    fireTableRowsUpdated(rowIndex, rowIndex);
+                    // Gen7: one area-wide range (see colMin) -> apply to all slots.
+                    for (Encounter target : levelEditTargets(enc)) {
+                        int tv = v;
+                        if (tv != 0 && tv < target.getLevel()) {
+                            tv = target.getLevel();
+                        }
+                        target.setMaxLevel(tv);
+                    }
+                    note(area, (areaWideLevels ? "area" : "slot " + (rowIndex + 1)) + " max level -> " + v);
+                    refreshAfterLevelEdit(rowIndex);
                 }
+            }
+        }
+
+        /**
+         * The slots a level edit should touch: just the edited slot normally, or
+         * the whole area on Gen7 (which writes a single area-wide level range).
+         */
+        private List<Encounter> levelEditTargets(Encounter edited) {
+            if (areaWideLevels && area != null) {
+                return new ArrayList<Encounter>(area);
+            }
+            List<Encounter> single = new ArrayList<Encounter>(1);
+            single.add(edited);
+            return single;
+        }
+
+        /** Refresh just the edited row, or the whole table when the edit was area-wide. */
+        private void refreshAfterLevelEdit(int rowIndex) {
+            if (areaWideLevels) {
+                fireTableDataChanged();
+            } else {
+                fireTableRowsUpdated(rowIndex, rowIndex);
             }
         }
 

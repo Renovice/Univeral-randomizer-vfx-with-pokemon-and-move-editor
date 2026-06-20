@@ -1,5 +1,20 @@
 # Finding Log
 
+## 2026-06-20 - Multi-agent bug audit + 22 High/Medium fixes (1.0.6)
+
+Hypothesis: a broad multi-agent audit (find + adversarial verify) would surface real bugs in recent work + high-risk areas.
+Finding: **True.** 12 finders -> 39 raw -> 33 confirmed (10 high, 13 med, 10 low) after adversarial verification (6 false positives filtered, e.g. a "Gen1 BST omits Special" claim that missed the Gen1Species.getBST() override). Fixed all High+Medium (23 targeted; 22 real after one more false positive caught at fix time).
+Key fixes (one agent per file, then central clean build + dup-check + headless ROM-load + GUI-boot smoke test, all green):
+- REGRESSIONS from this session: preset/settings-string load broken by the 5-byte gate block (RandomizerGUI.getValidRequiredROMName: != -> <); WHOLE_LINE BST gate cancelled itself out + rewrote non-qualifying lines (SpeciesBaseStatRandomizer.gateWholeLine rewritten to per-stage-gate qualifying lines only).
+- Editor data-corruption: searchable combos committed first filtered match not typed text (EditorUtils.commitSelection prefer findExactMatch); wild/static species edits dropped/corrupted forme on Gen6/7 (Encounters/StaticEncountersEditorPanel now set forme + reduce to base); Gen6/7 egg-move + Gen3/4/5/6 learnset sheets wiped other panels' shared-map edits on reload/close (ported Gen5's touchedKeys revert); Gen1 "Reset to default" never restored Special (PokemonCardViewPanel gen-aware stat index/snapshot).
+- Level curve: Gen7 ELITE milestone-key collision (n+4 -> non-overlapping keyspace); low-ace evil-team admin became Scale/Even anchor (anchor from first progression milestone).
+- Settings migration: 3 bit bugs in SettingsUpdater (0x80>>2 precedence; |->& x2 for updateTypeEffectiveness).
+- Robustness: Gen6 readTypeTable null-effectiveness crash (throw descriptive + mask 0xFF); off-EDT modal dialogs (RandomizerGUI failure branch + attemptToLogException via runOnEDT helper); finishRandomization left handler unreloaded on log-save failure (fall through to cleanup); NDSRom.saveTo partial-corrupt-output + handle leak (try-with-resources + delete partial; copy() EOF check); BW2 fairy-table 0x1740 unconditional early-return removed (validated candidate).
+FALSE POSITIVE caught at fix time: #8 "Gen7 type editor enabled but silently discards" - WRONG. Abstract3DSRomHandler extends AbstractRomHandler (NOT AbstractDSRomHandler); AbstractRomHandler.hasTypeEffectivenessSupport() returns false; Gen7 doesn't override -> editor already gated OFF for Gen7. Verifier mis-traced the hierarchy. No change needed.
+Reason: each fix reused existing helpers/patterns; verified by build + smoke tests.
+Next Step: 10 LOW-severity items still open (stream-leak-on-exception cleanups, setCursor off EDT, System.err redirect race, KEEP_BELOW_EVO/HP-floor BST edge cases) - deferred.
+
+
 ## 2026-06-20 - De-gate Gen5 Fairy detection (signature fallback) (1.0.5)
 
 Hypothesis: the Fairy signature search can be made to auto-detect Gen5 Fairy hacks that don't rename the type-name text, ADDED to (not replacing) the existing name check.

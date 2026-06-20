@@ -441,7 +441,7 @@ public class SettingsUpdater {
             various |= (byte) ((dataBlock[16] & 0x02) << 1);
             various |= (byte) (dataBlock[16] & 0x08);
             various |= (byte) (dataBlock[16] & 0x10);
-            various |= (byte) (dataBlock[16] & 0x80 >> 2);
+            various |= (byte) ((dataBlock[16] & 0x80) >> 2);
 
             dataBlock[15] = areaMethod;
             dataBlock[16] = restriction;
@@ -457,7 +457,7 @@ public class SettingsUpdater {
         insertExtraByte(56, (byte) 0x1);
         // move the former Update Type Effectiveness misctweak to a proper setting
         int miscTweaks = FileFunctions.readFullIntBigEndian(dataBlock, 34);
-        boolean updateTypeEffectiveness = (MiscTweak.OLD_UPDATE_TYPE_EFFECTIVENESS.getValue() | miscTweaks) != 0;
+        boolean updateTypeEffectiveness = (MiscTweak.OLD_UPDATE_TYPE_EFFECTIVENESS.getValue() & miscTweaks) != 0;
         if (updateTypeEffectiveness) {
             dataBlock[56] |= 0x40;
         }
@@ -498,7 +498,7 @@ public class SettingsUpdater {
             insertExtraByte(55, (byte) 0x1);
             // move the former Update Type Effectiveness misctweak to a proper setting
             int miscTweaks = FileFunctions.readFullIntBigEndian(dataBlock, 32);
-            boolean updateTypeEffectiveness = (MiscTweak.OLD_UPDATE_TYPE_EFFECTIVENESS.getValue() | miscTweaks) != 0;
+            boolean updateTypeEffectiveness = (MiscTweak.OLD_UPDATE_TYPE_EFFECTIVENESS.getValue() & miscTweaks) != 0;
             if (updateTypeEffectiveness) {
                 dataBlock[55] |= 0x40;
             }

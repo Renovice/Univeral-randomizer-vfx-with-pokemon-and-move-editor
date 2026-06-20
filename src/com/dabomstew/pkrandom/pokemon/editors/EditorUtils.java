@@ -1183,9 +1183,14 @@ public class EditorUtils {
             }
 
             adjusting = true;
-            Object selected = comboBox.getSelectedItem();
+            // Prefer an exact case-insensitive match of the typed text. After updateModelForQuery
+            // installs a filtered model, the combo auto-selects element 0, so getSelectedItem()
+            // would otherwise return the first filtered match (e.g. "Flail") instead of the entry
+            // the user actually typed (e.g. "Flamethrower"). Only fall back to the auto-selected
+            // model item when the editor text is not an exact match for a known entry.
+            Object selected = findExactMatch(editor.getText());
             if (selected == null) {
-                selected = findExactMatch(editor.getText());
+                selected = comboBox.getSelectedItem();
             }
             if (selected == null) {
                 selected = lastSelection;

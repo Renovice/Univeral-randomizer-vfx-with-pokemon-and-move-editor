@@ -278,8 +278,26 @@ public class StaticEncountersEditorPanel extends JPanel {
             // Tolerate a null pick ("(None)"): leave the existing species untouched
             // rather than nulling an encounter the game expects to be filled.
             if (picked != null && picked != currentEncounter.getSpecies()) {
-                currentEncounter.setSpecies(picked);
+                // Mirror StaticPokemonRandomizer.setSpeciesAndFormeForStaticEncounter:
+                // the StaticEncounter stores a base species plus a forme number, so on a
+                // species change we must update the forme too. Otherwise the original
+                // forme byte persists (e.g. Giratina-Origin -> Mewtwo would keep forme 1,
+                // and a forme-0 slot set to Deoxys-Attack would drop the forme), which is
+                // Gen6/7 data corruption.
+                currentEncounter.setForme(picked.getFormeNumber());
+                Species base = picked;
+                while (!base.isBaseForme()) {
+                    base = base.getBaseForme();
+                }
+                currentEncounter.setSpecies(base);
                 note(currentEncounter, "species -> " + picked.getName());
+                // Refresh the read-only forme display in showEncounter()'s info line.
+                StringBuilder info = new StringBuilder();
+                info.append("#").append(indexOfEncounter(currentEncounter) + 1);
+                if (currentEncounter.getForme() != 0) {
+                    info.append("  -  forme ").append(currentEncounter.getForme());
+                }
+                infoLabel.setText(info.toString());
                 refreshCurrentRow();
             }
         });

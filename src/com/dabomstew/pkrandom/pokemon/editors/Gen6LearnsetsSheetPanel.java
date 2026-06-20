@@ -41,6 +41,10 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
     private final EditorUtils.FindState findState = new EditorUtils.FindState();
     private final PokemonIconCache iconCache;
     private final Map<Integer, List<MoveLearnt>> movesBackup = new HashMap<>();
+    // Species numbers this panel itself has edited. Used so a Reload/restore only
+    // reverts keys this panel touched, instead of overwriting every species in the
+    // shared cache map (which would wipe edits made by other panels, e.g. Card View).
+    private final Set<Integer> touchedKeys = new HashSet<>();
 
     public Gen6LearnsetsSheetPanel(RomHandler romHandler) {
         this.romHandler = romHandler;
@@ -132,7 +136,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(EditorTheme.surface());
 
-        tableModel = new LearnsetsTableModel(pokemonList, moveList, movesLearnt, maxMovesPerPokemon);
+        tableModel = new LearnsetsTableModel(pokemonList, moveList, movesLearnt, maxMovesPerPokemon, touchedKeys);
 
         TableModel frozenModel = new AbstractTableModel() {
             @Override
@@ -393,17 +397,28 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
             }
             movesBackup.put(entry.getKey(), copy);
         }
+        // The freshly snapshotted state is the new baseline; nothing is "dirty" yet.
+        touchedKeys.clear();
     }
 
     private void restoreFromBackup() {
-        for (Map.Entry<Integer, List<MoveLearnt>> entry : movesBackup.entrySet()) {
-            List<MoveLearnt> target = movesLearnt.computeIfAbsent(entry.getKey(), k -> new ArrayList<>());
-            target.clear();
-            for (MoveLearnt backupMove : entry.getValue()) {
-                target.add(new MoveLearnt(backupMove));
+        // The movesLearnt map is shared across panels (Card View, etc.) via EditorDataCache.
+        // Only revert the species this panel itself edited, so a Reload/close here does not
+        // wipe edits other panels made to the same shared map after this panel's backup
+        // snapshot (and does not delete keys those other panels added).
+        for (Integer key : touchedKeys) {
+            List<MoveLearnt> original = movesBackup.get(key);
+            if (original == null) {
+                movesLearnt.remove(key);
+            } else {
+                List<MoveLearnt> restored = new ArrayList<>();
+                for (MoveLearnt backupMove : original) {
+                    restored.add(new MoveLearnt(backupMove));
+                }
+                movesLearnt.put(key, restored);
             }
         }
-        movesLearnt.keySet().removeIf(key -> !movesBackup.containsKey(key));
+        touchedKeys.clear();
 
         tableModel.fireTableDataChanged();
         if (frozenTable != null) {
@@ -642,6 +657,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         }
 
         List<MoveLearnt> learnset = movesLearnt.computeIfAbsent(species.getNumber(), k -> new ArrayList<>());
+        touchedKeys.add(species.getNumber());
         // Append an empty placeholder slot (move 0). It is harmless: save() drops
         // move <= 0 entries, so an empty slot the user never fills is never written.
         learnset.add(new MoveLearnt(0, 1));
@@ -699,6 +715,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
                 slot = candidate;
             }
         }
+        touchedKeys.add(species.getNumber());
         learnset.remove(slot);
 
         refreshTableStructure();
@@ -784,6 +801,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
             }
 
             if (updated) {
+                touchedKeys.add(species.getNumber());
                 speciesAffected++;
             }
         }
@@ -862,14 +880,18 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
         private final List<Species> pokemonList;
         private final List<Move> moveList;
         private final Map<Integer, List<MoveLearnt>> movesLearnt;
+        // Shared with the owning panel so cell edits register the species as "touched",
+        // ensuring restoreFromBackup only reverts keys this panel actually changed.
+        private final Set<Integer> touchedKeys;
         private int maxMoves;
         private String[] columnNames;
 
         LearnsetsTableModel(List<Species> pokemonList, List<Move> moveList,
-                Map<Integer, List<MoveLearnt>> movesLearnt, int maxMoves) {
+                Map<Integer, List<MoveLearnt>> movesLearnt, int maxMoves, Set<Integer> touchedKeys) {
             this.pokemonList = pokemonList;
             this.moveList = moveList;
             this.movesLearnt = movesLearnt;
+            this.touchedKeys = touchedKeys;
             buildColumns(maxMoves);
         }
 
@@ -968,6 +990,7 @@ public class Gen6LearnsetsSheetPanel extends JPanel {
                 return;
             }
 
+            touchedKeys.add(pokemon.getNumber());
             List<MoveLearnt> learnset = movesLearnt.computeIfAbsent(pokemon.getNumber(), k -> new ArrayList<>());
             int moveIndex = (columnIndex - 2) / 2;
 

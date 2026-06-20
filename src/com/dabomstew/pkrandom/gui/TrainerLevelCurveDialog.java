@@ -207,16 +207,29 @@ class TrainerLevelCurveDialog extends JDialog {
         // lowest-index appearance is the early island grand trial; any higher-index
         // appearance(s) are that kahuna's late-game Elite Four fight (and rematch). They
         // sit at very different levels, so folding them into one milestone would shift the
-        // endgame E4 team by the grand-trial's delta. Key the grand trial at n (label
-        // "Grand Trial n") and the Elite Four appearance at n+4 (label "Elite Four n").
+        // endgame E4 team by the grand-trial's delta. Key the grand trial at n; key the
+        // Elite Four appearance in a SEPARATE, non-overlapping space (n + 1000) so it can
+        // never collide with a higher ELITE tag's grand-trial key (e.g. ELITE1's Elite
+        // Four fight at the old n+4=5 vs. ELITE5's grand trial at 5 merged two different
+        // characters). The Elite Four label/sortKey are derived from n directly, not from
+        // the (offset) map key, so the user-facing text ("Elite Four n") is unchanged.
         for (Map.Entry<Integer, List<Trainer>> e : gen7Elites.entrySet()) {
             int n = e.getKey();
             List<Trainer> group = e.getValue();
             group.sort(Comparator.comparingInt(Trainer::getIndex));
             for (int i = 0; i < group.size(); i++) {
-                int key = i == 0 ? n : n + 4; // first (lowest index) = grand trial; rest = Elite Four
-                elites.computeIfAbsent(key, k -> newMilestone(eliteLabel(generation, k), 1000 + k))
-                        .bossTrainers.add(group.get(i));
+                if (i == 0) {
+                    // first (lowest index) = grand trial / early-island progression
+                    elites.computeIfAbsent(n, k -> newMilestone(eliteLabel(generation, k), 1000 + k))
+                            .bossTrainers.add(group.get(i));
+                } else {
+                    // late-game Elite Four fight (and rematch); separate key space so it
+                    // sorts after every grand trial yet never collides with one.
+                    int key = n + 1000;
+                    String eliteFourLabel = "Elite Four " + n;
+                    elites.computeIfAbsent(key, k -> newMilestone(eliteFourLabel, 2000 + n))
+                            .bossTrainers.add(group.get(i));
+                }
             }
         }
 
@@ -388,6 +401,16 @@ class TrainerLevelCurveDialog extends JDialog {
                 pos = i;
                 break;
             }
+        }
+        // insertByAce is only ever called for the extra (team-boss / Giovanni admin)
+        // milestones, after every gym/E4/champion progression milestone is already in
+        // the chain. A THEMED:<NAME>-STRONG admin can have a representative battle with
+        // an ace BELOW gym 1 (e.g. Wally's Lv5 tutorial), which would otherwise land it
+        // at index 0 and pin the Scale/Even-ramp anchor (chain.get(0).currentAce) to a
+        // tutorial battle. Clamp so an extra milestone is never placed ahead of the
+        // first progression milestone, keeping the first gym/E4 as the curve floor.
+        if (!chain.isEmpty() && pos == 0) {
+            pos = 1;
         }
         chain.add(pos, m);
     }

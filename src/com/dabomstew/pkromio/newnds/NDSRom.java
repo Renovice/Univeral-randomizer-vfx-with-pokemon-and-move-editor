@@ -231,6 +231,8 @@ public class NDSRom {
 
         // Initialize new ROM
         RandomAccessFile fNew = new RandomAccessFile(filename, "rw");
+        boolean saveSucceeded = false;
+        try {
 
         int headersize = readFromFile(this.baseRom, 0x84, 4);
         this.baseRom.seek(0);
@@ -436,7 +438,21 @@ public class NDSRom {
         fNew.setLength(application_end_offset);
 
         // done
-        fNew.close();
+        saveSucceeded = true;
+        } finally {
+            // Always release the file handle, even on failure.
+            try {
+                fNew.close();
+            } catch (IOException closeEx) {
+                // Ignore close failures; the primary failure (if any) is more important.
+            }
+            if (!saveSucceeded) {
+                // A failure mid-rebuild leaves a partial/corrupt ROM on disk
+                // ("rw" does not truncate). Delete it so a failed save never
+                // leaves a corrupt ROM behind for the caller.
+                new File(filename).delete();
+            }
+        }
         closeROM();
     }
 
@@ -446,6 +462,9 @@ public class NDSRom {
         while (bytes > 0) {
             int size2 = (bytes >= sizeof_copybuf) ? sizeof_copybuf : bytes;
             int read = from.read(copybuf, 0, size2);
+            if (read == -1) {
+                throw new IOException("Unexpected EOF while copying " + bytes + " remaining bytes");
+            }
             to.write(copybuf, 0, read);
             bytes -= read;
         }

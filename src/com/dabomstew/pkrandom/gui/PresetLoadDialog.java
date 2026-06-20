@@ -326,8 +326,7 @@ public class PresetLoadDialog extends JDialog {
         String cpgName = null;
         PlayerCharacterType typeToReplace = null;
         File config = new File(RootPath.path + "config.ini");
-        try {
-            Scanner scanner = new Scanner(config, "UTF-8");
+        try (Scanner scanner = new Scanner(config, "UTF-8")) {
             while (scanner.hasNext()) {
                 String q = scanner.nextLine().trim();
                 System.out.println(q);

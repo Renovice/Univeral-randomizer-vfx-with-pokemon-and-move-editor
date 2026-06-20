@@ -1463,18 +1463,18 @@ public class RandomizerGUI {
                     filename, seed, cpg, baos, results.getCheckValue(), raceMode, batchRandomization));
         } else {
             Exception e = results.getException();
-            if (e instanceof RandomizationException) {
-                attemptToLogException(e, "GUI.saveFailedMessage", "GUI.saveFailedMessageNoLog", true,
-                        settings.toString(), Long.toString(seed));
-            } else if (e instanceof CannotWriteToLocationException) {
-                JOptionPane.showMessageDialog(mainPanel,
-                        String.format(bundle.getString("GUI.cannotWriteToLocation"), filename));
-            } else {
-                attemptToLogException(e, "GUI.saveFailedIO", "GUI.saveFailedIONoLog",
-                        settings.toString(), Long.toString(seed));
-            }
-
             SwingUtilities.invokeLater(() -> {
+                if (e instanceof RandomizationException) {
+                    attemptToLogException(e, "GUI.saveFailedMessage", "GUI.saveFailedMessageNoLog", true,
+                            settings.toString(), Long.toString(seed));
+                } else if (e instanceof CannotWriteToLocationException) {
+                    JOptionPane.showMessageDialog(mainPanel,
+                            String.format(bundle.getString("GUI.cannotWriteToLocation"), filename));
+                } else {
+                    attemptToLogException(e, "GUI.saveFailedIO", "GUI.saveFailedIONoLog",
+                            settings.toString(), Long.toString(seed));
+                }
+
                 opDialog.setVisible(false);
                 romHandler = null;
                 initialState();
@@ -1503,7 +1503,9 @@ public class RandomizerGUI {
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(frame,
                         bundle.getString("GUI.logSaveFailed"));
-                return;
+                // Do NOT early-return: fall through so the registry clear + reinitialize/unload
+                // cleanup below always runs, otherwise the live handler keeps the already-randomized
+                // data and the next run double-randomizes.
             }
         } else if (!batchRandomization) {
             int response = JOptionPane.showConfirmDialog(frame,
@@ -1511,15 +1513,21 @@ public class RandomizerGUI {
                     bundle.getString("GUI.saveLogDialog.title"),
                     JOptionPane.YES_NO_OPTION);
             if (response == JOptionPane.YES_OPTION) {
+                boolean logSaved = false;
                 try {
                     saveLogFile(filename, out);
+                    logSaved = true;
                 } catch (IOException e) {
                     JOptionPane.showMessageDialog(frame,
                             bundle.getString("GUI.logSaveFailed"));
-                    return;
+                    // Do NOT early-return: fall through so the registry clear + reinitialize/unload
+                    // cleanup below always runs, otherwise the live handler keeps the already-
+                    // randomized data and the next run double-randomizes.
                 }
-                JOptionPane.showMessageDialog(frame,
-                        String.format(bundle.getString("GUI.logSaved"), filename));
+                if (logSaved) {
+                    JOptionPane.showMessageDialog(frame,
+                            String.format(bundle.getString("GUI.logSaved"), filename));
+                }
             }
         }
 
@@ -2631,19 +2639,36 @@ public class RandomizerGUI {
                 System.setErr(e1);
                 ps.close();
             }
-            if (showMessage) {
-                JOptionPane.showMessageDialog(mainPanel,
-                        String.format(bundle.getString(baseMessageKey), ex.getMessage(), errlog));
-            } else {
-                JOptionPane.showMessageDialog(mainPanel, String.format(bundle.getString(baseMessageKey), errlog));
-            }
+            final String errlogFinal = errlog;
+            runOnEDT(() -> {
+                if (showMessage) {
+                    JOptionPane.showMessageDialog(mainPanel,
+                            String.format(bundle.getString(baseMessageKey), ex.getMessage(), errlogFinal));
+                } else {
+                    JOptionPane.showMessageDialog(mainPanel,
+                            String.format(bundle.getString(baseMessageKey), errlogFinal));
+                }
+            });
         } catch (Exception logex) {
-            if (showMessage) {
-                JOptionPane.showMessageDialog(mainPanel,
-                        String.format(bundle.getString(noLogMessageKey), ex.getMessage()));
-            } else {
-                JOptionPane.showMessageDialog(mainPanel, bundle.getString(noLogMessageKey));
-            }
+            runOnEDT(() -> {
+                if (showMessage) {
+                    JOptionPane.showMessageDialog(mainPanel,
+                            String.format(bundle.getString(noLogMessageKey), ex.getMessage()));
+                } else {
+                    JOptionPane.showMessageDialog(mainPanel, bundle.getString(noLogMessageKey));
+                }
+            });
+        }
+    }
+
+    // Run a UI action on the Swing Event Dispatch Thread. If we're already on the EDT, run it
+    // directly (avoids re-marshaling when the caller has already moved the work onto the EDT);
+    // otherwise schedule it with invokeLater.
+    private static void runOnEDT(Runnable r) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            r.run();
+        } else {
+            SwingUtilities.invokeLater(r);
         }
     }
 
@@ -2663,7 +2688,7 @@ public class RandomizerGUI {
         byte[] data = Base64.getDecoder().decode(config);
 
         int nameLength = data[Settings.LENGTH_OF_SETTINGS_DATA] & 0xFF;
-        if (data.length != Settings.LENGTH_OF_SETTINGS_DATA + 9 + nameLength) {
+        if (data.length < Settings.LENGTH_OF_SETTINGS_DATA + 9 + nameLength) {
             return null; // not valid length
         }
         return new String(data, Settings.LENGTH_OF_SETTINGS_DATA + 1, nameLength, StandardCharsets.US_ASCII);

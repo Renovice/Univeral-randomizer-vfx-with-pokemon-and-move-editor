@@ -2846,12 +2846,6 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
      * @return The actual table offset, or -1 if not found
      */
     private int findFairyTypeTableOffset(byte[] data, int vanillaOffset, String sourceLabel) {
-        if (romEntry.getRomType() == Gen5Constants.Type_BW2
-                && !Boolean.TRUE.equals(typeEffectivenessStoredInArm9)
-                && sourceLabel.contains("overlay")) {
-            return DEFAULT_BW2_FAIRY_TABLE_OFFSET;
-        }
-
         System.out.println(sourceLabel + " size: " + data.length + " bytes");
         System.out.println("Vanilla type table offset: " + vanillaOffset);
 
@@ -2969,6 +2963,9 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
 
     private int[] mergeSpecialBW2Offsets(int[] baseOffsets) {
         int[] specialCandidates = new int[] {
+                // BW2 vanilla-fairy preference: tried first, but ONLY accepted if a real 18x18
+                // table actually validates there (via isValidTypeTable18x18 in the caller loop).
+                DEFAULT_BW2_FAIRY_TABLE_OFFSET,
                 0x0, 0x40, 0x80, 0x100, 0x140, 0x180, 0x200, 0x400,
                 0x7F0, 0x80F, 0xA00, 0xC00, 0x1000, 0x1F80
         };

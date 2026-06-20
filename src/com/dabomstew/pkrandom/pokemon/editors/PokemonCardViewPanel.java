@@ -219,8 +219,16 @@ public class PokemonCardViewPanel extends JPanel {
         if (snapList != null) {
             for (Species s : snapList) {
                 if (s != null && !originalStats.containsKey(s)) {
-                    originalStats.put(s, new int[] {
-                            s.getHp(), s.getAttack(), s.getDefense(), s.getSpatk(), s.getSpdef(), s.getSpeed() });
+                    // Gen 1 uses a single "Special" stat (no Sp.Atk/Sp.Def split): snapshot
+                    // {hp,atk,def,special,speed} so the index mapping in statByIndex/setStatByIndex
+                    // (3 -> Special, 4 -> Speed) restores the actual edited field on reset.
+                    if (generation == 1) {
+                        originalStats.put(s, new int[] {
+                                s.getHp(), s.getAttack(), s.getDefense(), s.getSpecial(), s.getSpeed() });
+                    } else {
+                        originalStats.put(s, new int[] {
+                                s.getHp(), s.getAttack(), s.getDefense(), s.getSpatk(), s.getSpdef(), s.getSpeed() });
+                    }
                 }
             }
         }
@@ -628,7 +636,18 @@ public class PokemonCardViewPanel extends JPanel {
         return section;
     }
 
-    private static int statByIndex(Species s, int i) {
+    private int statByIndex(Species s, int i) {
+        // Gen 1 has a single "Special" stat (no Sp.Atk/Sp.Def split): index 3 -> Special, 4 -> Speed.
+        if (generation == 1) {
+            switch (i) {
+                case 0: return s.getHp();
+                case 1: return s.getAttack();
+                case 2: return s.getDefense();
+                case 3: return s.getSpecial();
+                case 4: return s.getSpeed();
+                default: return 0;
+            }
+        }
         switch (i) {
             case 0: return s.getHp();
             case 1: return s.getAttack();
@@ -640,7 +659,19 @@ public class PokemonCardViewPanel extends JPanel {
         }
     }
 
-    private static void setStatByIndex(Species s, int i, int v) {
+    private void setStatByIndex(Species s, int i, int v) {
+        // Gen 1 has a single "Special" stat (no Sp.Atk/Sp.Def split): index 3 -> Special, 4 -> Speed.
+        if (generation == 1) {
+            switch (i) {
+                case 0: s.setHp(v); break;
+                case 1: s.setAttack(v); break;
+                case 2: s.setDefense(v); break;
+                case 3: s.setSpecial(v); break;
+                case 4: s.setSpeed(v); break;
+                default: break;
+            }
+            return;
+        }
         switch (i) {
             case 0: s.setHp(v); break;
             case 1: s.setAttack(v); break;

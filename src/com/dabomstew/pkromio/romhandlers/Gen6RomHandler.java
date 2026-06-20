@@ -3070,7 +3070,7 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
                 for (Type defender : typeTable.getTypes()) {
                     int offset = tableOffset + (Gen6Constants.typeToByte(attacker) * tableWidth)
                             + Gen6Constants.typeToByte(defender);
-                    int effectivenessInternal = battleFile[offset];
+                    int effectivenessInternal = battleFile[offset] & 0xFF;
                     Effectiveness effectiveness;
                     switch (effectivenessInternal) {
                         case 8:
@@ -3086,8 +3086,10 @@ public class Gen6RomHandler extends Abstract3DSRomHandler {
                             effectiveness = Effectiveness.ZERO;
                             break;
                         default:
-                            effectiveness = null;
-                            break;
+                            throw new IllegalStateException(
+                                String.format("Invalid effectiveness value %d at offset %d for %s vs %s",
+                                    effectivenessInternal, offset, attacker, defender)
+                            );
                     }
                     typeTable.setEffectiveness(attacker, defender, effectiveness);
                 }

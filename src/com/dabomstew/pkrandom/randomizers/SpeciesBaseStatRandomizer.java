@@ -180,21 +180,48 @@ public class SpeciesBaseStatRandomizer extends Randomizer {
     }
 
     /**
-     * WHOLE_LINE handling: gate by the line's base-form BST. If the base qualifies, the
-     * whole line is scaled consistently using a proportional copy-up (so it stays coherent).
+     * WHOLE_LINE handling: qualification is decided from the line's basic species. If the basic
+     * qualifies (and is changed), the SAME gate (same direction + amount + distribution) is applied
+     * to every stage of the line individually, so each stage's own BST is buffed/nerfed and its own
+     * spread is distributed. Lines whose basic does not qualify are left completely untouched.
      */
     private void gateWholeLine(Settings.GateDirection direction, Settings.GateDistribution distribution,
                                Settings.GateCeiling ceiling, int threshold, int amount, boolean amountRandom) {
-        // Buff/nerf the basic species (gated by its own BST), then copy the change up the
-        // evolution line proportionally so every stage moves together.
-        BasicSpeciesAction<Species> bpAction = pk ->
-                gateSingleSpecies(pk, direction, distribution, ceiling, threshold, amount, amountRandom);
-        EvolvedSpeciesAction<Species> copyAction = (evFrom, evTo, toMonIsFinalEvo) ->
-                copyRandomizedStatsUpEvolution(evFrom, evTo);
+        // Walk each evolution line starting from its basic species. Gate the basic first; only if
+        // it qualified do we propagate the gate to each evolved stage (via the same gateSingleSpecies
+        // path), so every stage's own BST is buffed/nerfed and its own spread is distributed.
+        // We deliberately do NOT use copyRandomizedStatsUpEvolution here, as that would restore each
+        // evolved stage to its original BST (cancelling the gate) and overwrite its unique spread.
+        SpeciesSet allSpecs = romHandler.getSpeciesSetInclFormes();
+        Set<Species> processed = new HashSet<>();
+        for (Species basic : allSpecs) {
+            if (!isGateBasicSpecies(allSpecs, basic)) {
+                continue;
+            }
+            boolean lineQualifies = gateSingleSpecies(basic, direction, distribution, ceiling,
+                    threshold, amount, amountRandom);
+            if (!lineQualifies) {
+                // Basic did not qualify; leave the whole line untouched.
+                continue;
+            }
 
-        // evolutionSanity=true so we walk lines; copySplitEvos=false so split evos copy from
-        // their (already gated) pre-evo too, keeping the whole family consistent.
-        copyUpEvolutionsHelper.apply(true, false, bpAction, copyAction);
+            // Propagate the gate to every evolved stage in the line, each gated by its own BST.
+            processed.clear();
+            Deque<Species> queue = new ArrayDeque<>();
+            queue.add(basic);
+            processed.add(basic);
+            while (!queue.isEmpty()) {
+                Species from = queue.poll();
+                for (Evolution evo : from.getEvolutionsFrom()) {
+                    Species to = evo.getTo();
+                    if (to == null || !allSpecs.contains(to) || to == from || !processed.add(to)) {
+                        continue;
+                    }
+                    gateSingleSpecies(to, direction, distribution, ceiling, threshold, amount, amountRandom);
+                    queue.add(to);
+                }
+            }
+        }
     }
 
     /**

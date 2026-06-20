@@ -40,6 +40,10 @@ public class Gen6EggMovesSheetPanel extends JPanel {
     private final List<Move> moveList;
     private final Map<Integer, List<Integer>> eggMoves;
     private final Map<Integer, List<Integer>> eggMovesBackup = new HashMap<>();
+    // Species numbers this panel itself has edited. Used so a Reload/restore only
+    // reverts keys this panel touched, instead of clearing the entire shared cache
+    // map (which would wipe edits made by other panels, e.g. the Card View).
+    private final Set<Integer> touchedKeys = new HashSet<>();
     private final Map<String, Integer> moveLookup = new HashMap<>();
     private final PokemonIconCache iconCache;
     // Whether the current ROM handler actually persists per-forme egg moves
@@ -474,6 +478,7 @@ public class Gen6EggMovesSheetPanel extends JPanel {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+        touchedKeys.add(species.getNumber());
         moves.add(-1);
         tableModel.fireTableRowsUpdated(row, row);
     }
@@ -511,6 +516,7 @@ public class Gen6EggMovesSheetPanel extends JPanel {
             return;
         }
 
+        touchedKeys.add(species.getNumber());
         int lastReal = moves.size() - 1;
         while (lastReal >= 0 && (moves.get(lastReal) == null || moves.get(lastReal) < 0)) {
             lastReal--;
@@ -565,6 +571,8 @@ public class Gen6EggMovesSheetPanel extends JPanel {
         for (Map.Entry<Integer, List<Integer>> entry : eggMoves.entrySet()) {
             eggMovesBackup.put(entry.getKey(), new ArrayList<>(entry.getValue()));
         }
+        // The freshly snapshotted state is the new baseline; nothing is "dirty" yet.
+        touchedKeys.clear();
     }
 
     private void commitChanges() {
@@ -572,10 +580,18 @@ public class Gen6EggMovesSheetPanel extends JPanel {
     }
 
     private void restoreFromBackup() {
-        eggMoves.clear();
-        for (Map.Entry<Integer, List<Integer>> entry : eggMovesBackup.entrySet()) {
-            eggMoves.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+        // The eggMoves map is shared across panels (Card View, etc.) via EditorDataCache.
+        // Only revert the species this panel itself edited, so a Reload here does not wipe
+        // edits other panels made to the same shared map after this panel's backup snapshot.
+        for (Integer key : touchedKeys) {
+            List<Integer> original = eggMovesBackup.get(key);
+            if (original == null) {
+                eggMoves.remove(key);
+            } else {
+                eggMoves.put(key, new ArrayList<>(original));
+            }
         }
+        touchedKeys.clear();
         tableModel.fireTableDataChanged();
         frozenTable.repaint();
         mainTable.repaint();
@@ -807,6 +823,7 @@ public class Gen6EggMovesSheetPanel extends JPanel {
             }
             int slot = columnIndex - 2;
             List<Integer> moves = eggMoves.computeIfAbsent(species.getNumber(), id -> new ArrayList<>());
+            touchedKeys.add(species.getNumber());
             ensureCapacity(moves, slot + 1);
 
             String value = aValue == null ? "" : aValue.toString().trim();
