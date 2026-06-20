@@ -133,6 +133,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
     private TypeTable typeTable;
     private boolean hasFairyType = false; // Whether ROM has Fairy type (based on text file detection)
     private Boolean fairyTypeDetected = null; // Cached detectFairyType() result: null = not yet successfully read (forces a retry); Boolean = definitive answer so detection runs once per ROM
+    private Boolean fairySignatureDetected = null; // Cached fallback (type-chart signature) result; same null=retry / Boolean=definitive caching as fairyTypeDetected
     private boolean hasFairyTypeTable = false; // Whether we successfully loaded an 18x18 type effectiveness table
     private Boolean typeEffectivenessStoredInArm9 = null; // Tracks whether the active type chart lives in ARM9 or an overlay
     private int resolvedTypeEffectivenessOffset = -1; // Actual offset used when reading/writing the type chart
@@ -175,6 +176,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
         this.typeTable = null;
         this.hasFairyType = false;
         this.fairyTypeDetected = null;
+        this.fairySignatureDetected = null;
         this.hasFairyTypeTable = false;
         this.typeEffectivenessStoredInArm9 = null;
         this.resolvedTypeEffectivenessOffset = -1;
@@ -267,6 +269,11 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             // Detect Fairy type early so we can properly read Pokemon types
             if (!hasFairyType) {
                 hasFairyType = detectFairyType();
+                if (!hasFairyType) {
+                    // Fallback (in addition to the name check, not replacing it): some hacks add
+                    // Fairy without renaming the type-name text, so look for the chart signature.
+                    hasFairyType = detectFairyTypeBySignature();
+                }
             }
 
             pokeNarc = this.readNARC(romEntry.getFile("PokemonStats"));
@@ -319,6 +326,11 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             // Detect Fairy type early so we can properly read Move types
             if (!hasFairyType) {
                 hasFairyType = detectFairyType();
+                if (!hasFairyType) {
+                    // Fallback (in addition to the name check, not replacing it): some hacks add
+                    // Fairy without renaming the type-name text, so look for the chart signature.
+                    hasFairyType = detectFairyTypeBySignature();
+                }
             }
 
             moveNarc = this.readNARC(romEntry.getFile("MoveData"));
@@ -3248,10 +3260,83 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
         }
     }
 
+    /**
+     * Additional Fairy detector used ONLY as a fallback when detectFairyType() (the type-name
+     * text check) comes back false -- it does NOT replace that check. Some Gen5 Fairy romhacks
+     * add the Fairy type mechanically (type byte 0x11 with a real 18x18 chart) but never rename
+     * the type-name strings, so the name check misses them. This looks for Fairy's fingerprint in
+     * the type-effectiveness data instead.
+     *
+     * Deliberately conservative and cheap: it must not false-positive on vanilla 17-type ROMs
+     * (that would break every normal Gen5 load) and must not pay the multi-second cost of
+     * findFairyTypeTableOffset()'s full byte-by-byte sweep. So it only does an exact known-table
+     * match plus Fairy's strict interaction fingerprint at the standard candidate offsets.
+     *
+     * @return true only if a valid 18x18 Fairy signature is found.
+     */
+    private boolean detectFairyTypeBySignature() {
+        if (fairySignatureDetected != null) {
+            return fairySignatureDetected; // cached; only definitive scans are cached (read failures retry)
+        }
+        try {
+            boolean found = scanForFairySignature(loadBattleOverlay(), "battle overlay");
+            if (!found && arm9 != null) {
+                found = scanForFairySignature(arm9, "arm9");
+            }
+            debugLog("DEBUG: detectFairyTypeBySignature returning: " + found);
+            fairySignatureDetected = found; // definitive scan completed -- cache
+            return found;
+        } catch (Exception e) {
+            // Data not ready / read error: leave un-cached so a later call site retries.
+            debugLog("DEBUG: detectFairyTypeBySignature could not scan yet: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Cheap, conservative scan of one buffer for a Fairy (18x18) type-chart signature:
+     * (1) the exact known b2w2-fairy table anywhere (near-zero false-positive), or
+     * (2) Fairy's strict attacking-row + defending-column fingerprint at the standard
+     *     candidate offsets only (NOT a full sweep).
+     */
+    private boolean scanForFairySignature(byte[] data, String sourceLabel) {
+        if (data == null) {
+            return false;
+        }
+        // (1) Exact known-table match. matchesB2W2FairyTable early-exits, so this is cheap.
+        if (findSignatureFairyTableOffset(data) != -1) {
+            debugLog("DEBUG: Fairy signature (known b2w2 table) found in " + sourceLabel);
+            return true;
+        }
+        // (2) Strict interaction fingerprint at the standard candidate offsets only.
+        int vanillaOffset = romEntry.getIntValue("TypeEffectivenessOffset");
+        int[] candidates = { 0x0, vanillaOffset, DEFAULT_BW2_FAIRY_TABLE_OFFSET };
+        for (int testOffset : candidates) {
+            if (testOffset < 0 || testOffset + 324 > data.length) {
+                continue;
+            }
+            for (int fairyRow = 0; fairyRow < 18; fairyRow++) {
+                int rowOffset = testOffset + (fairyRow * 18);
+                if (checkFairyAttackingRow(data, rowOffset)
+                        && checkFairyDefendingColumn(data, testOffset, fairyRow)) {
+                    debugLog("DEBUG: Fairy interaction fingerprint found in " + sourceLabel
+                            + " at offset 0x" + Integer.toHexString(testOffset) + " (row/col index " + fairyRow + ")");
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private TypeTable readTypeTable() {
         try {
             if (!hasFairyType) {
                 hasFairyType = detectFairyType();
+                if (!hasFairyType) {
+                    // Fallback (in addition to the name check, not replacing it): some hacks add
+                    // Fairy without renaming the type-name text, so look for the chart signature.
+                    hasFairyType = detectFairyTypeBySignature();
+                }
             }
 
             // If NOT a fairy ROM, read directly like the old Gen5 handler (no validation, no search)

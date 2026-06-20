@@ -1,5 +1,31 @@
 # Finding Log
 
+## 2026-06-20 - De-gate Gen5 Fairy detection (signature fallback) (1.0.5)
+
+Hypothesis: the Fairy signature search can be made to auto-detect Gen5 Fairy hacks that don't rename the type-name text, ADDED to (not replacing) the existing name check.
+Finding: **True — implemented and verified safe.**
+Evidence/Reason:
+- Previously `readTypeTable()` only ran the signature search if `detectFairyType()` (type-name text contains "Fairy") returned true → a hack that adds Fairy mechanically (type byte 0x11) without renaming type names was missed.
+- Added `detectFairyTypeBySignature()` + `scanForFairySignature()`: fallback runs ONLY when the name check is false; does exact known-table match (`findSignatureFairyTableOffset`) + Fairy's strict interaction fingerprint (`checkFairyAttackingRow`+`checkFairyDefendingColumn`) at standard candidate offsets only (0x0, TypeEffectivenessOffset, DEFAULT_BW2_FAIRY_TABLE_OFFSET). Deliberately NOT the 10-30s full `findTableByFairyInteractions` sweep (would penalize every vanilla load). Wired into all 3 detection call sites (loadPokemonStats/loadMoves/readTypeTable), name check first. Cached (`fairySignatureDetected`), read-failures retry, reset in `loadedROM()`.
+- CRITICAL safety check (no false-positive on vanilla): headless probe (`loadRom`) on vanilla Pokemon Black AND user's 1.nds → both `detectFairyType=false`, `detectFairyTypeBySignature=false`, ROM loads as 17-type. Builds clean, no dup methods.
+- Limitation: positive detection is sound by reuse of the existing proven signature matchers but was NOT run against a live Fairy hack (none on disk); a non-standard-offset custom-table hack that also omits the name rename would still be missed (only exact-known-table is full-buffer; interaction check is candidate-offsets-only, by design for speed).
+Next Step: none — shipped 1.0.5. (If a Fairy hack with a custom table at a non-standard offset ever fails to detect, widen scanForFairySignature's candidate set or gate a full sweep behind a cheap type-byte precheck.)
+
+
+## 2026-06-20 - Gen5 Fairy detect-once + self-contained launcher (1.0.3, 1.0.4)
+
+Hypothesis: the Fairy subsystem broke (detectFairyType printed `false` ~3-4x); separately, the bundled JRE was incomplete.
+Finding: **Mixed — both explained, neither was a regression I caused.**
+Evidence:
+- `detectFairyType()` returning `false` is CORRECT for the loaded vanilla BW/BW2 ROM (17 types, no "Fairy"; Fairy is Gen6+). Subsystem intact (string gate + `findTableByFairyInteractions` signature search + `matchesB2W2FairyTable` + table builders). The signature search is gated behind `detectFairyType()` being true, so a Fairy-hack that doesn't rename type-name text would bypass it (latent, not hit here).
+- Ran 3x because all 3 call sites (`loadPokemonStats`:266, `loadMoves`:318, `readTypeTable`:3245) guard with `if(!hasFairyType)`, which only cached a POSITIVE result; `false` was recomputed each time. Call sites original since first commit `6f3dc36` (not added by me).
+- Bundled `launcher/jre/` had `lib/` but no `bin/` (java.exe). Root cause: `.gitignore` `[Bb]in/` (line 36) silently matches the JRE's own `bin/` → never committed. So `launcher_WINDOWS.bat` fell back to system Java every release since 1.0.0.
+Fixes:
+- Added `Boolean fairyTypeDetected` cache: detection runs once per ROM (caches definitive yes/no); read-failures stay un-cached so they retry (robustness preserved). Reset in `loadedROM()`. Restored `upr.debugTypeTable` default to true. → release 1.0.3.
+- Bundled complete Temurin 8u462 JRE `bin/` (SHA-256 verified, smoke-tested boots the app), scoped `.gitignore` un-ignore `!launcher/jre/bin/**`, `git add -f`. `.bat` untouched. → release 1.0.4 (now runs with no system Java).
+Next Step: none — shipped. (Optional future: de-gate the Fairy signature search so Fairy-hacks that don't rename type text still detect.)
+
+
 ## 2026-06-19 - POTENTIAL_BUGS editor/misc fixes #7 #8 #9 #35
 
 Hypothesis: Four POTENTIAL_BUGS editor/misc claims (#7 TM/tutor dialogs bypass save/revert lifecycle, #8 TrainerEditorPanel hard-codes text limits, #9 Gen5 DEBUG_TYPE_TABLE defaults true, #35 moves-sheet wrapper tables show stale derived values) are accurate against current code.
