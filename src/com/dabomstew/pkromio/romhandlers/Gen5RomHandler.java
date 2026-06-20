@@ -84,7 +84,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
     private static final int DEFAULT_BW1_FAIRY_TABLE_OVERLAY = 93;
     private static final int DEFAULT_BW2_FAIRY_TABLE_OFFSET = 0x1740;
     private static final int DEFAULT_BW2_FAIRY_TABLE_OVERLAY = 167;
-    private static final boolean DEBUG_TYPE_TABLE = Boolean.parseBoolean(System.getProperty("upr.debugTypeTable", "false"));
+    private static final boolean DEBUG_TYPE_TABLE = Boolean.parseBoolean(System.getProperty("upr.debugTypeTable", "true"));
 
     /** Prints type-table / Fairy-detection diagnostics only when -Dupr.debugTypeTable=true (off by
      *  default), so normal ROM loads don't spam the console. */
@@ -132,6 +132,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
     private int pickupItemsTableOffset;
     private TypeTable typeTable;
     private boolean hasFairyType = false; // Whether ROM has Fairy type (based on text file detection)
+    private Boolean fairyTypeDetected = null; // Cached detectFairyType() result: null = not yet successfully read (forces a retry); Boolean = definitive answer so detection runs once per ROM
     private boolean hasFairyTypeTable = false; // Whether we successfully loaded an 18x18 type effectiveness table
     private Boolean typeEffectivenessStoredInArm9 = null; // Tracks whether the active type chart lives in ARM9 or an overlay
     private int resolvedTypeEffectivenessOffset = -1; // Actual offset used when reading/writing the type chart
@@ -173,6 +174,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
         this.romEntry = entryFor(romCode, version);
         this.typeTable = null;
         this.hasFairyType = false;
+        this.fairyTypeDetected = null;
         this.hasFairyTypeTable = false;
         this.typeEffectivenessStoredInArm9 = null;
         this.resolvedTypeEffectivenessOffset = -1;
@@ -3176,6 +3178,11 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
      * @return true if the ROM has Fairy type in its type names list, false otherwise
      */
     private boolean detectFairyType() {
+        if (fairyTypeDetected != null) {
+            // Already determined this load — don't re-read the type-name NARC or re-log.
+            // (Only successful reads are cached; read failures below leave it null so a later call retries.)
+            return fairyTypeDetected;
+        }
         debugLog("DEBUG: detectFairyType() called");
         try {
             // Read the type names from the text file
@@ -3231,6 +3238,7 @@ public class Gen5RomHandler extends AbstractDSRomHandler {
             }
 
             debugLog("DEBUG: detectFairyType returning: " + hasFairy);
+            fairyTypeDetected = hasFairy; // definitive read succeeded — cache so the other call sites skip (detect once per ROM)
             return hasFairy;
         } catch (Exception e) {
             // If anything goes wrong (missing text offset, etc.), assume no Fairy type
