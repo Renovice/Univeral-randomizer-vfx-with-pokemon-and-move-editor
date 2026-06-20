@@ -593,6 +593,8 @@ public class PokemonCardViewPanel extends JPanel {
                     noteEdit(sp, "secondary type");
                     rebuild(sp);
                 });
+        applyTypeColorRenderer(primaryCombo);
+        applyTypeColorRenderer(secondaryCombo);
         typeRow.add(taggedControl("Type 1", primaryCombo));
         typeRow.add(taggedControl("Type 2", secondaryCombo));
 
@@ -1997,6 +1999,37 @@ public class PokemonCardViewPanel extends JPanel {
         Chip c = new Chip("×", REMOVE_RED, Color.WHITE, onClick);
         c.setToolTipText(tooltip);
         return c;
+    }
+
+    /**
+     * Colors a Type dropdown — both the selected value and the popup items — by each type's
+     * colour (reusing {@link #typeColor(Type)}, the same palette as the Personal Sheet / Move
+     * card), so the type boxes aren't flat mono. An empty value (no Type 2) keeps theme colours.
+     */
+    private void applyTypeColorRenderer(JComboBox<String> combo) {
+        final javax.swing.ListCellRenderer<? super String> base = combo.getRenderer();
+        combo.setRenderer((list, value, index, isSelected, cellHasFocus) -> {
+            java.awt.Component comp = base.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            if (!(comp instanceof JLabel)) {
+                return comp;
+            }
+            JLabel label = (JLabel) comp;
+            String s = value == null ? "" : value.toString();
+            Type t = null;
+            if (!s.isEmpty()) {
+                try {
+                    t = parseType(s);
+                } catch (Exception ignored) {
+                    t = null;
+                }
+            }
+            if (t != null) {
+                label.setOpaque(true);
+                label.setBackground(typeColor(t));
+                label.setForeground(Color.WHITE);
+            }
+            return label;
+        });
     }
 
     private static JComponent typeChip(Type type) {

@@ -749,17 +749,53 @@ public class RandomizerGUI {
         }
 
         pbsGateThresholdSpinner = new JSpinner(new SpinnerNumberModel(400, 100, 800, 5));
+        pbsGateThresholdSpinner.setToolTipText("The base-stat-total (BST) cut-off. Buffs apply to Pokemon at or below "
+                + "this total; nerfs apply to Pokemon at or above it.");
         pbsGateAmountSpinner = new JSpinner(new SpinnerNumberModel(20, 1, 255, 1));
+        pbsGateAmountSpinner.setToolTipText("How many total base-stat points to add (buff) or remove (nerf).");
+
         pbsGateDirectionComboBox = new JComboBox<>(new String[] {
                 "Buff below threshold", "Nerf above threshold", "Both" });
+        installComboItemTooltips(pbsGateDirectionComboBox,
+                "Which Pokemon are affected, based on their base-stat total (BST).",
+                new String[] {
+                        "Increase the BST of every Pokemon whose total is at or below the threshold.",
+                        "Decrease the BST of every Pokemon whose total is at or above the threshold.",
+                        "Do both: buff Pokemon at/below the threshold AND nerf those at/above it." });
+
         pbsGateAmountStyleComboBox = new JComboBox<>(new String[] {
                 "Fixed amount", "Random up to amount" });
+        installComboItemTooltips(pbsGateAmountStyleComboBox,
+                "Whether the change is exactly the Amount, or randomized.",
+                new String[] {
+                        "Always apply exactly the Amount value above.",
+                        "Each affected Pokemon (or evolution line) rolls a random change from 1 up to the Amount." });
+
         pbsGateDistributionComboBox = new JComboBox<>(new String[] {
                 "Proportional (keep shape)", "Even split", "Random spread" });
+        installComboItemTooltips(pbsGateDistributionComboBox,
+                "How the added/removed points are spread across the 6 stats.",
+                new String[] {
+                        "Scale every stat by the same %, keeping the Pokemon's stat shape (a fast/frail mon stays fast/frail).",
+                        "Split the points equally across all 6 stats.",
+                        "Distribute the points randomly across the 6 stats." });
+
         pbsGateCeilingComboBox = new JComboBox<>(new String[] {
                 "Allow crossing threshold", "Cap at threshold" });
+        installComboItemTooltips(pbsGateCeilingComboBox,
+                "Whether a buff/nerf may push a Pokemon past the threshold.",
+                new String[] {
+                        "Apply the full amount even if the new BST crosses the threshold (e.g. 395 -> 415 with threshold 400).",
+                        "Limit the change so the new BST never crosses the threshold (buffs stop at it, nerfs stop at it)." });
+
         pbsGateEvoHandlingComboBox = new JComboBox<>(new String[] {
                 "Per stage", "Whole line", "Keep below evolution" });
+        installComboItemTooltips(pbsGateEvoHandlingComboBox,
+                "How evolution lines are handled when buffing/nerfing.",
+                new String[] {
+                        "Judge and change each Pokemon on its own, independent of its evolutions.",
+                        "If a line qualifies (by its base form), boost every stage consistently so the line stays coherent.",
+                        "Buff a Pokemon but cap it so its BST stays below what it evolves into (keeps the evolution hierarchy)." });
 
         pbsGatedRadioButton.addActionListener(e -> enableOrDisableSubControls());
 
@@ -808,12 +844,30 @@ public class RandomizerGUI {
         setGateSubControlsEnabled(false);
     }
 
+    /**
+     * Sets an overall tooltip on a combo (shown when hovering the closed box) plus a per-item
+     * tooltip shown when hovering each option in the open dropdown, so every option self-describes.
+     */
+    private void installComboItemTooltips(JComboBox<String> combo, String overall, String[] itemTips) {
+        combo.setToolTipText(overall);
+        final javax.swing.ListCellRenderer<? super String> base = combo.getRenderer();
+        combo.setRenderer((list, value, index, isSelected, cellHasFocus) -> {
+            java.awt.Component comp = base.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            if (index >= 0 && index < itemTips.length) {
+                list.setToolTipText(itemTips[index]);
+            }
+            return comp;
+        });
+    }
+
     private void addGateRow(JPanel panel, GridBagConstraints c, int row, String labelText, JComponent field) {
         c.gridx = 0;
         c.gridy = row;
         c.weightx = 0.0;
         c.fill = GridBagConstraints.NONE;
-        panel.add(new JLabel(labelText), c);
+        JLabel rowLabel = new JLabel(labelText);
+        rowLabel.setToolTipText(field.getToolTipText()); // hovering the label shows the control's description too
+        panel.add(rowLabel, c);
         c.gridx = 1;
         c.weightx = 0.0;
         c.fill = GridBagConstraints.NONE;
