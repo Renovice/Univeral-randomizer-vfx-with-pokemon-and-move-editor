@@ -2394,6 +2394,19 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 			int baseMHOffset = romEntry.getIntValue("MapTableARM9Offset");
 			List<String> allMapNames = getStrings(romEntry.getIntValue("MapNamesTextOffset"));
 			int mapNameIndexSize = romEntry.getIntValue("MapTableNameIndexSize");
+			// On recompiled/hacked ROMs (e.g. the co-op Platinum build) the ARM9 map-header table
+			// offset is shifted, so the bytes read here are not real map-name indices. Detect that
+			// once (out-of-range index or the table running past the ARM9) and skip map naming
+			// entirely instead of crashing. Encounter randomization still works from the NARC;
+			// only the cosmetic per-map name labels (and "trainers use local Pokemon") are lost.
+			int lastHeaderOffset = baseMHOffset + (numMapHeaders - 1) * 24 + 18;
+			if (baseMHOffset <= 0 || lastHeaderOffset + 2 > arm9.length || !mapTableOffsetLooksValid(
+					baseMHOffset, numMapHeaders, mapNameIndexSize, allMapNames.size())) {
+				System.err.println("WARNING: Map header table offset does not match this ROM "
+						+ "(recompiled/hacked ARM9?); skipping wild-map name labels.");
+				loadedWildMapNames = true;
+				return;
+			}
 			for (int map = 0; map < numMapHeaders; map++) {
 				int baseOffset = baseMHOffset + map * 24;
 				int mapNameIndex = (mapNameIndexSize == 2) ? readWord(arm9, baseOffset + 18)
@@ -2417,6 +2430,27 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 			throw new RomIOException(e);
 		}
 
+	}
+
+	/**
+	 * Returns false when the configured map-header table offset does not resolve to sane map-name
+	 * indices for every header, which is the tell-tale of a recompiled/hacked ROM whose ARM9 has
+	 * shifted. Used to skip cosmetic map naming instead of crashing with an out-of-range index.
+	 */
+	private boolean mapTableOffsetLooksValid(int baseMHOffset, int numMapHeaders, int mapNameIndexSize,
+											 int mapNameCount) {
+		for (int map = 0; map < numMapHeaders; map++) {
+			int baseOffset = baseMHOffset + map * 24;
+			if (baseOffset + 18 + (mapNameIndexSize == 2 ? 2 : 1) > arm9.length) {
+				return false;
+			}
+			int mapNameIndex = (mapNameIndexSize == 2) ? readWord(arm9, baseOffset + 18)
+					: (arm9[baseOffset + 18] & 0xFF);
+			if (mapNameIndex < 0 || mapNameIndex >= mapNameCount) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static final int POKEDEX_TIME_SLOTS = 3;
@@ -3753,6 +3787,17 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 	}
 
 	private void getRoamers(List<StaticEncounter> statics) {
+		// Guard against recompiled/decomp ROMs (e.g. the co-op Platinum build) whose ARM9 has
+		// shifted so the hardcoded roamer species offsets no longer point at valid data. Reading
+		// or (worse) IPS-patching at those stale offsets would either crash with an out-of-range
+		// species index or silently corrupt the ROM. If the offsets are clearly invalid, skip
+		// roamer handling entirely rather than write garbage.
+		if (!roamerOffsetsLookValid()) {
+			System.err.println("WARNING: Roamer offsets do not match this ROM (recompiled/hacked ARM9?); "
+					+ "skipping roaming Pokemon reading/randomization for this ROM.");
+			roamerRandomizationEnabled = false;
+			return;
+		}
 		if (romEntry.getRomType() == Gen4Constants.Type_DP) {
 			int offset = romEntry.getIntValue("RoamingPokemonFunctionStartOffset");
 			if (readWord(arm9, offset + 44) != 0) {
@@ -3775,6 +3820,35 @@ public class Gen4RomHandler extends AbstractDSRomHandler {
 			se.setLevel(roamer.getLevel(this));
 			statics.add(se);
 		}
+	}
+
+	/**
+	 * Sanity-checks the configured roamer ARM9 offsets against the loaded ARM9. Returns false when
+	 * the offsets are out of range or resolve to species indices outside the valid range, which is
+	 * what happens on a recompiled ROM whose ARM9 layout has shifted. Used to gracefully disable
+	 * roamer handling instead of crashing or corrupting the ROM.
+	 */
+	private boolean roamerOffsetsLookValid() {
+		List<RoamingPokemon> roamers = romEntry.getRoamingPokemon();
+		if (roamers.isEmpty() || arm9 == null) {
+			return false;
+		}
+		for (RoamingPokemon roamer : roamers) {
+			if (roamer.speciesCodeOffsets.length == 0) {
+				return false;
+			}
+			for (int off : roamer.speciesCodeOffsets) {
+				if (off < 0 || off + 2 > arm9.length) {
+					return false;
+				}
+				int species = readWord(arm9, off);
+				// A valid (possibly still-unpatched-to-0) roamer species must be in the Pokemon range.
+				if (species != 0 && (species < 0 || species >= pokes.length)) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	private void setRoamers(Iterator<StaticEncounter> statics) {
